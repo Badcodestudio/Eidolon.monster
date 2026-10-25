@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /*.css
+Allow: /*.js
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.webp
+Allow: /*.svg
+
+# Sitemap marker for production deployment pipeline
+Sitemap: __WEGIC_DEPLOYMENT_ORIGIN__/sitemap.xml
