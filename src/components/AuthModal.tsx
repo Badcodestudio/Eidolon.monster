@@ -91,6 +91,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [adultConfirmed, setAdultConfirmed] = useState(false);
 
   useEffect(() => {
     setMode(initialMode);
@@ -115,13 +116,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (mode === 'signup' && !adultConfirmed) {
+      setError('Eidolon is for adults only. Please confirm you are 18 or older.');
+      return;
+    }
+
     setLoading(true);
     try {
       if (mode === 'signup') {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { name: name.trim() || email.split('@')[0] } },
+          options: {
+            data: {
+              name: name.trim() || email.split('@')[0],
+              adult_confirmed_at: new Date().toISOString(),
+            },
+          },
         });
         if (signUpError) throw signUpError;
         if (!data.session) {
@@ -286,6 +297,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           </div>
 
+          {mode === 'signup' && (
+            <label className="flex items-start gap-2.5 text-[11px] text-gray-300 leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={adultConfirmed}
+                onChange={(e) => setAdultConfirmed(e.target.checked)}
+                className="mt-0.5 accent-emerald-500"
+              />
+              <span>I confirm that I am 18 years of age or older. Eidolon is for adults only.</span>
+            </label>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -306,7 +329,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="pt-2 border-t border-white/5 text-center">
           <p className="text-[11px] text-gray-500 flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            Zero-log privacy guarantee & 18+ compliant ID checks
+            Adults only (18+). Prompts are kept for safety review.
           </p>
         </div>
       </div>
