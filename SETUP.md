@@ -28,3 +28,8 @@ Note: Tripo's download links expire, so models should be saved to Supabase Stora
 12. Deploy a NEW function named `admin` from `supabase/functions/admin/index.ts` (Verify JWT on).
 13. Redeploy `generate-image` and `generate-3d` (moderation rules changed: weapons removed, explicit = instant lock).
 14. After the site redeploys: sign in with your owner account, open /admin -> Moderation tab.
+
+## Highlighted triggers
+
+15. SQL Editor: run `supabase/migrations/004_matched.sql`.
+16. Redeploy `generate-image`, `generate-3d` and `admin` (all three changed).
