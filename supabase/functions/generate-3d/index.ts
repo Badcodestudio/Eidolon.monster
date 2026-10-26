@@ -48,20 +48,32 @@ function stripSafe(text: string): string {
   return SAFE_PHRASES.reduce((t, r) => t.replace(r, " "), text);
 }
 
-type Verdict = { ok: true } | { ok: false; reason: string; strikes: number; lock: boolean; message: string };
+type Verdict = { ok: true } | { ok: false; reason: string; strikes: number; lock: boolean; message: string; matched: string[] };
+
+function hits(patterns: RegExp[], text: string): string[] {
+  const out: string[] = [];
+  for (const r of patterns) {
+    const m = text.match(r);
+    if (m && m[0]) out.push(m[0].trim());
+  }
+  return [...new Set(out)];
+}
 
 function moderate(text: string): Verdict {
   const cleaned = stripSafe(text);
-  if (MINOR_PATTERNS.some((r) => r.test(cleaned))) {
-    return { ok: false, reason: "minors", strikes: LOCK_AT, lock: true,
+  const minorHits = hits(MINOR_PATTERNS, cleaned);
+  if (minorHits.length) {
+    return { matched: minorHits, ok: false, reason: "minors", strikes: LOCK_AT, lock: true,
       message: "This request involves minors, which is not allowed. Your account has been locked and will be reviewed." };
   }
-  if (EXPLICIT_PATTERNS.some((r) => r.test(text))) {
-    return { ok: false, reason: "explicit", strikes: LOCK_AT, lock: true,
+  const explicitHits = hits(EXPLICIT_PATTERNS, text);
+  if (explicitHits.length) {
+    return { matched: explicitHits, ok: false, reason: "explicit", strikes: LOCK_AT, lock: true,
       message: "Explicit content isn't allowed in Eidolon. Your account has been locked and will be reviewed." };
   }
-  if (HALF_PATTERNS.some((r) => r.test(text))) {
-    return { ok: false, reason: "brands", strikes: 0.5, lock: false,
+  const brandHits = hits(HALF_PATTERNS, text);
+  if (brandHits.length) {
+    return { matched: brandHits, ok: false, reason: "brands", strikes: 0.5, lock: false,
       message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt." };
   }
   return { ok: true };
@@ -148,7 +160,7 @@ Deno.serve(async (req) => {
     const strikes = Math.max(Number(profile?.strikes ?? 0) + verdict.strikes, verdict.lock ? LOCK_AT : 0);
     const lock = verdict.lock || strikes >= LOCK_AT;
     await admin.from("profiles").update({ strikes, locked: lock, lock_reason: lock ? verdict.reason : profile?.lock_reason ?? null }).eq("id", user.id);
-    await admin.from("generations").insert({ user_id: user.id, kind: "3d", prompt, blocked: true, block_reason: verdict.reason, status: "blocked", ip });
+    await admin.from("generations").insert({ user_id: user.id, kind: "3d", prompt, blocked: true, block_reason: verdict.reason, matched: verdict.matched.join(", "), status: "blocked", ip });
     return json({ error: lock && !verdict.lock ? "Your account has been locked after repeated violations and will be reviewed." : verdict.message }, 403);
   }
 
