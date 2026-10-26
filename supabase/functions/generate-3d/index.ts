@@ -35,7 +35,8 @@ const HALF_PATTERNS: RegExp[] = [
   /\b(marvel|disney|pixar|nintendo|pokemon|pok[eé]mon|dc comics|batman|superman|spider-?man|mickey mouse|star wars|harry potter)\b/i,
 ];
 
-// Tier 4: gratuitous gore / torture / mutilation (fal's policy forbids it) -> half strike.
+// Tier 4: gore words are NOT blocked (dark fantasy needs them). A matching prompt is allowed through and
+// quietly noted for the owner to review in Admin. fal's own checker still screens the picture.
 const GORE_PATTERNS: RegExp[] = [
   /\b(gore|gory|mutilat\w*|dismember\w*|disembowel\w*|eviscerat\w*|decapitat\w*|torture[sd]?|torturing|entrails)\b/i,
 ];
@@ -86,17 +87,21 @@ function moderate(text: string): Verdict {
     return { matched: brandHits, ok: false, reason: "brands", strikes: 0.5, lock: false,
       message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt." };
   }
-  const goreHits = hits(GORE_PATTERNS, text);
-  if (goreHits.length) {
-    return { matched: goreHits, ok: false, reason: "gore", strikes: 0.5, lock: false,
-      message: "This request was blocked: extreme gore, torture and mutilation aren't allowed. Please adjust your prompt." };
-  }
   const personHits = hits(REAL_PERSON_PATTERNS, text);
   if (personHits.length) {
     return { matched: personHits, ok: false, reason: "real_person", strikes: 0.5, lock: false,
       message: "This request was blocked: images of real people and celebrities aren't allowed. Please describe an original character instead." };
   }
   return { ok: true };
+}
+// Allowed through, but noted for the owner (shown in Admin -> Moderation as "note: gore").
+// deno-lint-ignore no-explicit-any
+async function noteGore(admin: any, userId: string, text: string, kind: string, ip: string | null) {
+  const found = hits(GORE_PATTERNS, text);
+  if (!found.length) return;
+  await admin.from("generations").insert({
+    user_id: userId, kind, prompt: text, blocked: true, block_reason: "note: gore (allowed through)", matched: found.join(", "), ip,
+  });
 }
 // -----------------------------------------------------------------------------
 
@@ -208,6 +213,8 @@ Deno.serve(async (req) => {
     await admin.from("generations").insert({ user_id: user.id, kind: "3d", prompt, blocked: true, block_reason: verdict.reason, matched: verdict.matched.join(", "), status: "blocked", ip });
     return json({ error: lock && !verdict.lock ? "Your account has been locked after repeated violations and will be reviewed." : verdict.message }, 403);
   }
+
+  if (!isOwner && prompt) await noteGore(admin, user.id, prompt, "3d", ip);
 
   // Image mode only accepts pictures this user made in Eidolon, so every image has already passed moderation.
   let file: { type: string; url: string } | undefined;
