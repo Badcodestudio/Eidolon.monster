@@ -34,7 +34,8 @@ const HALF_PATTERNS: RegExp[] = [
   /\b(marvel|disney|pixar|nintendo|pokemon|pok[eé]mon|dc comics|batman|superman|spider-?man|mickey mouse|star wars|harry potter)\b/i,
 ];
 
-// Tier 4: gratuitous gore / torture / mutilation (fal's policy forbids it) -> half strike.
+// Tier 4: gore words are NOT blocked (dark fantasy needs them). A matching prompt is allowed through and
+// quietly noted for the owner to review in Admin. fal's own checker still screens the picture.
 const GORE_PATTERNS: RegExp[] = [
   /\b(gore|gory|mutilat\w*|dismember\w*|disembowel\w*|eviscerat\w*|decapitat\w*|torture[sd]?|torturing|entrails)\b/i,
 ];
@@ -94,17 +95,21 @@ function moderate(text: string): Verdict {
       message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt.",
     };
   }
-  const goreHits = hits(GORE_PATTERNS, text);
-  if (goreHits.length) {
-    return { matched: goreHits, ok: false, reason: "gore", strikes: 0.5, lock: false,
-      message: "This request was blocked: extreme gore, torture and mutilation aren't allowed. Please adjust your prompt." };
-  }
   const personHits = hits(REAL_PERSON_PATTERNS, text);
   if (personHits.length) {
     return { matched: personHits, ok: false, reason: "real_person", strikes: 0.5, lock: false,
       message: "This request was blocked: images of real people and celebrities aren't allowed. Please describe an original character instead." };
   }
   return { ok: true };
+}
+// Allowed through, but noted for the owner (shown in Admin -> Moderation as "note: gore").
+// deno-lint-ignore no-explicit-any
+async function noteGore(admin: any, userId: string, text: string, kind: string, ip: string | null) {
+  const found = hits(GORE_PATTERNS, text);
+  if (!found.length) return;
+  await admin.from("generations").insert({
+    user_id: userId, kind, prompt: text, blocked: true, block_reason: "note: gore (allowed through)", matched: found.join(", "), ip,
+  });
 }
 // ---------------------------------------------------------------------------
 
@@ -167,6 +172,8 @@ Deno.serve(async (req) => {
     return json({ error: msg }, 403);
   }
 
+  if (!isOwner) await noteGore(admin, user.id, prompt, "image", ip);
+
   // 5. Plan limits (from the plans table) and abuse guard.
   //    Standard and High-quality images each have their own monthly allowance.
   const { data: planRow } = await admin.from("plans").select("*").eq("name", profile?.plan ?? "Free").maybeSingle();
@@ -204,7 +211,7 @@ Deno.serve(async (req) => {
     method: "POST",
     headers: { Authorization: `Key ${falKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt, image_size: imageSize, num_images: 1, enable_safety_checker: true, output_format: "jpeg",
+      prompt: `adult, ${prompt}`, image_size: imageSize, num_images: 1, enable_safety_checker: true, output_format: "jpeg",
     }),
   });
   const result = await falRes.json().catch(() => ({}));
@@ -217,6 +224,13 @@ Deno.serve(async (req) => {
     await admin.from("generations").insert({
       user_id: user.id, prompt, blocked: true, block_reason: "engine_safety", ip,
     });
+    // A small strike: one false alarm never matters, but repeatedly pushing at the engine's checker does.
+    if (!isOwner) {
+      const strikes = Number(profile?.strikes ?? 0) + 0.25;
+      await admin.from("profiles").update({
+        strikes, locked: strikes >= LOCK_AT, lock_reason: strikes >= LOCK_AT ? "engine_safety" : profile?.lock_reason ?? null,
+      }).eq("id", user.id);
+    }
     return json({ error: "The image engine declined this prompt. Please change it and try again." }, 422);
   }
 
