@@ -10,7 +10,8 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const DAILY_LIMIT = Number(Deno.env.get("DAILY_IMAGE_LIMIT") ?? "30");
+// Safety net against abuse, on top of the monthly plan limit.
+const DAILY_LIMIT = Number(Deno.env.get("DAILY_IMAGE_LIMIT") ?? "150");
 const LOCK_AT = 2; // strikes at which an account is locked
 
 // ---- Moderation (draft rules: review and edit these lists) ----------------
@@ -31,6 +32,17 @@ const EXPLICIT_PATTERNS: RegExp[] = [
 // Tier 3: trademarked characters / brands -> half strike.
 const HALF_PATTERNS: RegExp[] = [
   /\b(marvel|disney|pixar|nintendo|pokemon|pok[eé]mon|dc comics|batman|superman|spider-?man|mickey mouse|star wars|harry potter)\b/i,
+];
+
+// Tier 4: gratuitous gore / torture / mutilation (fal's policy forbids it) -> half strike.
+const GORE_PATTERNS: RegExp[] = [
+  /\b(gore|gory|mutilat\w*|dismember\w*|disembowel\w*|eviscerat\w*|decapitat\w*|torture[sd]?|torturing|entrails)\b/i,
+];
+// Tier 5: real people / deepfakes (fal's policy forbids likenesses of real people) -> half strike.
+// Starter list: add more names in Admin notes and here as you see them.
+const REAL_PERSON_PATTERNS: RegExp[] = [
+  /\b(deepfake|celebrity|celebrities|real person|real people|likeness of|lookalike of|photo of a real)\b/i,
+  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[e\u00e9]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
 ];
 
 // Harmless phrases that contain trigger words (colours, young animals, idioms).
@@ -56,8 +68,8 @@ function hits(patterns: RegExp[], text: string): string[] {
   return [...new Set(out)];
 }
 
-function moderate(prompt: string): Verdict {
-  const cleaned = stripSafe(prompt);
+function moderate(text: string): Verdict {
+  const cleaned = stripSafe(text);
   const minorHits = hits(MINOR_PATTERNS, cleaned);
   if (minorHits.length) {
     return {
@@ -66,7 +78,7 @@ function moderate(prompt: string): Verdict {
       message: "This request involves minors, which is not allowed. Your account has been locked and will be reviewed.",
     };
   }
-  const explicitHits = hits(EXPLICIT_PATTERNS, prompt);
+  const explicitHits = hits(EXPLICIT_PATTERNS, text);
   if (explicitHits.length) {
     return {
       matched: explicitHits,
@@ -74,13 +86,23 @@ function moderate(prompt: string): Verdict {
       message: "Explicit content isn't allowed in Eidolon. Your account has been locked and will be reviewed.",
     };
   }
-  const brandHits = hits(HALF_PATTERNS, prompt);
+  const brandHits = hits(HALF_PATTERNS, text);
   if (brandHits.length) {
     return {
       matched: brandHits,
       ok: false, reason: "brands", strikes: 0.5, lock: false,
       message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt.",
     };
+  }
+  const goreHits = hits(GORE_PATTERNS, text);
+  if (goreHits.length) {
+    return { matched: goreHits, ok: false, reason: "gore", strikes: 0.5, lock: false,
+      message: "This request was blocked: extreme gore, torture and mutilation aren't allowed. Please adjust your prompt." };
+  }
+  const personHits = hits(REAL_PERSON_PATTERNS, text);
+  if (personHits.length) {
+    return { matched: personHits, ok: false, reason: "real_person", strikes: 0.5, lock: false,
+      message: "This request was blocked: images of real people and celebrities aren't allowed. Please describe an original character instead." };
   }
   return { ok: true };
 }
@@ -110,13 +132,14 @@ Deno.serve(async (req) => {
   const user = userData.user;
 
   // 2. Input
-  let body: { prompt?: string; image_size?: string };
+  let body: { prompt?: string; image_size?: string; quality?: string };
   try { body = await req.json(); } catch { return json({ error: "Bad request." }, 400); }
   const prompt = (body.prompt ?? "").toString().trim();
   if (!prompt) return json({ error: "Please enter a prompt." }, 400);
   if (prompt.length > 2000) return json({ error: "Prompt is too long." }, 400);
   const allowedSizes = ["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"];
   const imageSize = allowedSizes.includes(body.image_size ?? "") ? body.image_size! : "portrait_4_3";
+  const quality: "standard" | "high" = body.quality === "high" ? "high" : "standard";
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 
   // 3. Account state
@@ -144,38 +167,78 @@ Deno.serve(async (req) => {
     return json({ error: msg }, 403);
   }
 
-  // 5. Daily limit
+  // 5. Plan limits (from the plans table) and abuse guard.
+  //    Standard and High-quality images each have their own monthly allowance.
+  const { data: planRow } = await admin.from("plans").select("*").eq("name", profile?.plan ?? "Free").maybeSingle();
+  const standardLimit = Number(planRow?.images_per_month ?? 0);
+  const highLimit = Number(planRow?.images_high_per_month ?? 0);
+  const monthlyLimit = quality === "high" ? highLimit : standardLimit;
+  if (!isOwner && standardLimit <= 0 && highLimit <= 0) {
+    return json({ error: "Free accounts can browse the gallery. Choose a plan to generate images." }, 402);
+  }
+  if (!isOwner && monthlyLimit <= 0) {
+    return json({ error: quality === "high"
+      ? "High quality isn't included in your plan. Choose Standard, or upgrade your plan."
+      : "Standard images aren't included in your plan." }, 402);
+  }
+  const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
+  const { count: monthCount } = await admin.from("generations")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id).eq("blocked", false).eq("kind", "image").eq("quality", quality)
+    .gte("created_at", monthStart.toISOString());
+  if (!isOwner && (monthCount ?? 0) >= monthlyLimit) {
+    return json({ error: `You've used all ${monthlyLimit} ${quality === "high" ? "High-quality" : "Standard"} images in your plan this month.` }, 429);
+  }
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { count } = await admin.from("generations")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id).eq("blocked", false).eq("kind", "image").gte("created_at", since);
   if (!isOwner && (count ?? 0) >= DAILY_LIMIT) {
-    return json({ error: `Daily limit of ${DAILY_LIMIT} images reached. Please come back tomorrow.` }, 429);
+    return json({ error: "You're generating very quickly. Please try again later." }, 429);
   }
 
-  // 6. Generate (fal.ai FLUX schnell, safety checker ON)
-  const falRes = await fetch("https://fal.run/fal-ai/flux/schnell", {
+  // 6. Generate with fal.ai (safety checker always ON).
+  //    Standard = FLUX schnell, High = Z Image Turbo.
+  const endpoint = quality === "high" ? "fal-ai/z-image/turbo" : "fal-ai/flux/schnell";
+  const falRes = await fetch(`https://fal.run/${endpoint}`, {
     method: "POST",
     headers: { Authorization: `Key ${falKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt, image_size: imageSize, num_images: 1, enable_safety_checker: true,
+      prompt, image_size: imageSize, num_images: 1, enable_safety_checker: true, output_format: "jpeg",
     }),
   });
   const result = await falRes.json().catch(() => ({}));
   if (!falRes.ok) {
-    console.error("fal.ai error", falRes.status, JSON.stringify(result).slice(0, 500));
+    console.error("fal.ai error", endpoint, falRes.status, JSON.stringify(result).slice(0, 500));
     return json({ error: "The image engine had a problem. Please try again in a moment." }, 502);
   }
-  const imageUrl: string | undefined = result?.images?.[0]?.url;
-  if (!imageUrl || result?.has_nsfw_concepts?.[0] === true) {
+  const falUrl: string | undefined = result?.images?.[0]?.url;
+  if (!falUrl || result?.has_nsfw_concepts?.[0] === true) {
     await admin.from("generations").insert({
       user_id: user.id, prompt, blocked: true, block_reason: "engine_safety", ip,
     });
     return json({ error: "The image engine declined this prompt. Please change it and try again." }, 422);
   }
 
-  await admin.from("generations").insert({
-    user_id: user.id, prompt, result_url: imageUrl, ip,
+  // 7. Keep a permanent copy in our own storage (fal links can expire). Falls back to the fal link if the copy fails.
+  let imageUrl = falUrl;
+  try {
+    const img = await fetch(falUrl);
+    if (!img.ok) throw new Error(`download ${img.status}`);
+    const bytes = new Uint8Array(await img.arrayBuffer());
+    const type = img.headers.get("content-type") ?? "image/jpeg";
+    const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+    const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+    const up = await admin.storage.from("creations").upload(path, bytes, { contentType: type, upsert: false });
+    if (up.error) throw up.error;
+    imageUrl = admin.storage.from("creations").getPublicUrl(path).data.publicUrl;
+  } catch (e) {
+    console.error("storage copy failed (using fal link)", String(e));
+  }
+
+  const { error: saveErr } = await admin.from("generations").insert({
+    user_id: user.id, prompt, result_url: imageUrl, ip, quality,
   });
-  return json({ url: imageUrl });
+  if (saveErr) console.error("could not record generation", saveErr.message);
+  return json({ url: imageUrl, quality });
 });
