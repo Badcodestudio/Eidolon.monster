@@ -20,6 +20,32 @@ interface BlockedItem {
   kind: string;
   prompt: string | null;
   block_reason: string | null;
+  matched?: string | null;
+}
+
+
+// Splits the prompt so the words that tripped the filter can be highlighted.
+function Highlighted({ text, matched }: { text: string; matched?: string | null }) {
+  const terms = (matched ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (!terms.length) return <>{text}</>;
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'gi');
+  return (
+    <>
+      {text.split(re).map((part, i) =>
+        terms.some((t) => t.toLowerCase() === part.toLowerCase()) ? (
+          <mark key={i} className="bg-red-500/40 text-red-100 rounded px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
 }
 
 const card = 'bg-[#0E1015] border border-white/10 rounded-2xl p-5 space-y-3';
@@ -190,7 +216,15 @@ export default function ModerationPanel() {
                 {b.block_reason} &bull; {b.kind} &bull; {new Date(b.created_at).toLocaleString()}
               </span>
             </div>
-            <p className="text-xs text-gray-200 break-words">{b.prompt}</p>
+            <p className="text-xs text-gray-200 break-words">
+              <Highlighted text={b.prompt ?? ''} matched={b.matched} />
+            </p>
+            {b.block_reason === 'engine_safety' && (
+              <p className="text-[11px] text-amber-300 font-mono">Caught by the image engine's own safety check (no word to show).</p>
+            )}
+            {b.matched && (
+              <p className="text-[11px] text-red-300 font-mono">Tripped on: {b.matched}</p>
+            )}
           </div>
         ))}
       </div>
