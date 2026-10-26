@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
+import { supabase } from '@/lib/supabase';
+import { invokeFunction } from '@/lib/api';
 import {
   Box,
   Sparkles,
@@ -13,8 +15,6 @@ import {
   FileCode,
   Wand2,
   Image as ImageIcon,
-  Key,
-  ExternalLink,
   AlertCircle,
 } from 'lucide-react';
 
@@ -33,10 +33,6 @@ export default function ThreeDStudioPage() {
   const [targetPolycount, setTargetPolycount] = useState('50k');
   const [isGenerating, setIsGenerating] = useState(false);
   const [tripoStatus, setTripoStatus] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem('eidolon_3d_key') || localStorage.getItem('tripo_api_key') || '';
-  });
-  const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   const [generatedModel, setGeneratedModel] = useState<{
@@ -71,167 +67,67 @@ export default function ThreeDStudioPage() {
     }
   }, [searchParams]);
 
-  const handleSaveApiKey = (val: string) => {
-    const clean = val.trim();
-    setApiKey(clean);
-    localStorage.setItem('eidolon_3d_key', clean);
-    localStorage.setItem('tripo_api_key', clean);
-  };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const handleSynthesize3D = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setIsGenerating(true);
+    setTripoStatus('Contacting the 3D studio...');
 
-    // If Tripo API Key is configured, execute real Tripo3D API Task
-    if (apiKey) {
-      setIsGenerating(true);
-      setTripoStatus('Contacting Tripo3D API engine...');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        throw new Error('Please sign in to create 3D models.');
+      }
 
-      try {
-        // If imageUrl is a local base64 data URL, upload or pass prompt to avoid payload limit
-        let filePayload: { type: string; url?: string } | undefined = undefined;
-        if (inputMode === 'image' && imageUrl) {
-          if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-            filePayload = {
-              type: imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg') ? 'jpg' : 'png',
-              url: imageUrl,
-            };
-          }
-        }
+      // The server checks your plan, runs moderation and holds the Tripo key.
+      const start = await invokeFunction<{ task_id?: string }>('generate-3d', {
+        action: 'start',
+        mode: inputMode,
+        image_url: imageUrl,
+        prompt,
+        topology,
+        polycount: targetPolycount,
+      });
+      const taskId = start.task_id;
+      if (!taskId) throw new Error('The 3D studio did not accept the request.');
 
-        const payload: Record<string, unknown> = {
-          type: filePayload ? 'image_to_model' : 'text_to_model',
-        };
+      setTripoStatus('Generating 3D geometry & PBR texture maps...');
 
-        if (filePayload) {
-          payload.file = filePayload;
-        } else {
-          payload.prompt = prompt || 'Dark fantasy character model, intricate obsidian armor and ornate filigree';
-        }
+      // Poll the server every 3 seconds for up to 4 minutes.
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        await sleep(3000);
+        const check = await invokeFunction<{
+          status: string;
+          progress?: number;
+          model_url?: string | null;
+          preview_url?: string | null;
+          error?: string;
+        }>('generate-3d', { action: 'status', task_id: taskId });
 
-        let res: Response | null = null;
-        try {
-          res = await fetch('https://api.tripo3d.ai/v2/openapi/task', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(payload),
-          });
-        } catch {
-          // If browser direct call is blocked by Tripo's CORS policy, switch smoothly to browser client synthesis preview
-          setIsGenerating(false);
-          setTripoStatus('');
+        if (check.status === 'success') {
           setGeneratedModel({
-            title: prompt.slice(0, 36) || 'Synthesized 3D Mesh',
+            title: prompt.slice(0, 36) || 'Synthesized 3D Asset',
             format: 'GLB / USDZ / OBJ',
-            polycount: targetPolycount === '50k' ? '49,850 Quads' : '18,400 Triangles',
-            textureMap: '4K PBR Metallic-Roughness',
-            previewUrl: imageUrl || 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935238399_0.png?imageMogr2/format/webp',
+            polycount: targetPolycount === '50k' ? '~50,000 faces' : '~18,000 faces',
+            textureMap: 'PBR Metallic-Roughness',
+            previewUrl: check.preview_url || imageUrl,
+            modelUrl: check.model_url || undefined,
           });
-          setErrorMsg(
-            'Notice: Tripo3D API restricts browser-direct CORS calls from client apps. High-speed 3D viewport preview mode was activated instead.'
-          );
           return;
         }
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || `Tripo3D API returned error ${res.status}`);
+        if (check.status === 'failed') {
+          throw new Error(check.error || 'The 3D engine could not build a model from this input.');
         }
-
-        const data = await res.json();
-        const taskId = data.data?.task_id;
-
-        if (!taskId) {
-          throw new Error('Tripo3D did not return a valid task_id.');
-        }
-
-        setTripoStatus('Generating 3D geometry & PBR texture maps...');
-
-        // Step 2: Poll task status until complete
-        let attempts = 0;
-        const maxAttempts = 30;
-        const pollInterval = setInterval(async () => {
-          attempts += 1;
-          try {
-            const checkRes = await fetch(`https://api.tripo3d.ai/v2/openapi/task/${taskId}`, {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-              },
-            });
-
-            if (checkRes.ok) {
-              const checkData = await checkRes.json();
-              const status = checkData.data?.status;
-
-              if (status === 'success') {
-                clearInterval(pollInterval);
-                setIsGenerating(false);
-                setTripoStatus('');
-
-                const outputGlb = checkData.data?.output?.model || checkData.data?.output?.pbr_model;
-                const renderImg = checkData.data?.output?.rendered_image || imageUrl;
-
-                setGeneratedModel({
-                  title: prompt.slice(0, 36) || 'Synthesized 3D Asset',
-                  format: 'GLB / USDZ / OBJ',
-                  polycount: targetPolycount === '50k' ? '49,850 Quads' : '18,400 Triangles',
-                  textureMap: '4K PBR Metallic-Roughness',
-                  previewUrl: renderImg || 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935238399_0.png?imageMogr2/format/webp',
-                  modelUrl: outputGlb,
-                });
-              } else if (status === 'failed') {
-                clearInterval(pollInterval);
-                setIsGenerating(false);
-                setTripoStatus('');
-                setErrorMsg('Tripo3D mesh synthesis failed on this input.');
-              } else {
-                setTripoStatus(`Synthesizing 3D mesh: ${checkData.data?.progress || (attempts * 4)}%`);
-              }
-            }
-
-            if (attempts >= maxAttempts) {
-              clearInterval(pollInterval);
-              setIsGenerating(false);
-              setTripoStatus('');
-              // Fallback to active render
-              setGeneratedModel({
-                title: prompt.slice(0, 32) + '...',
-                format: 'GLB / USDZ / OBJ',
-                polycount: targetPolycount === '50k' ? '49,850 Quads' : '18,400 Triangles',
-                textureMap: '4K PBR Metallic-Roughness',
-                previewUrl: imageUrl || 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935238399_0.png?imageMogr2/format/webp',
-              });
-            }
-          } catch (pollErr: unknown) {
-            clearInterval(pollInterval);
-            setIsGenerating(false);
-            setTripoStatus('');
-            const msg = pollErr instanceof Error ? pollErr.message : 'Error polling Tripo3D API status.';
-            setErrorMsg(msg);
-          }
-        }, 3000);
-      } catch (apiErr: unknown) {
-        setIsGenerating(false);
-        setTripoStatus('');
-        const msg = apiErr instanceof Error ? apiErr.message : 'Failed to connect to Tripo3D API endpoint.';
-        setErrorMsg(msg);
+        setTripoStatus(`Synthesizing 3D mesh: ${check.progress ?? 0}%`);
       }
-    } else {
-      // High-speed browser simulation when key is being configured
-      setIsGenerating(true);
-      setTimeout(() => {
-        setIsGenerating(false);
-        setGeneratedModel({
-          title: prompt.slice(0, 32) + '...',
-          format: 'GLB / USDZ / OBJ',
-          polycount: targetPolycount === '50k' ? '49,850 Quads' : '18,400 Triangles',
-          textureMap: '4K PBR Metallic-Roughness',
-          previewUrl: imageUrl || 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935238399_0.png?imageMogr2/format/webp',
-        });
-      }, 2000);
+      throw new Error('This is taking longer than expected. Please try again in a few minutes.');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong creating the 3D model.');
+    } finally {
+      setIsGenerating(false);
+      setTripoStatus('');
     }
   };
 
@@ -275,72 +171,17 @@ export default function ThreeDStudioPage() {
               3D Models Studio
             </h1>
             <p className="text-xs sm:text-sm text-gray-400 max-w-xl leading-relaxed">
-              Transform conceptual character prompts and sketches into production-ready 3D game meshes, quad topology, and 4K PBR textures using your connected 3D API key.
+              Transform conceptual character prompts and sketches into production-ready 3D game meshes, quad topology, and 4K PBR textures with the Eidolon studio engine.
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowKeyConfig(!showKeyConfig)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition border ${
-                apiKey
-                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                  : 'bg-white/5 text-gray-400 hover:text-white border-white/10'
-              }`}
-            >
-              <Key className="w-3.5 h-3.5 text-blue-400" />
-              <span>{apiKey ? 'Tripo Key Active' : 'Enter Tripo Key'}</span>
-            </button>
             <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-mono flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {apiKey ? 'API Live Pipeline' : 'Preview Mode'}
+              Live Pipeline
             </span>
           </div>
         </div>
-
-        {/* Tripo3D API Key Drawer */}
-        {showKeyConfig && (
-          <div className="bg-[#0E1015] border border-blue-500/30 rounded-2xl p-5 mb-8 text-xs space-y-3 animate-fade-in shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-semibold text-white flex items-center gap-2">
-                  <Key className="w-4 h-4 text-blue-400" />
-                  Tripo3D API Key Integration
-                </p>
-                <p className="text-gray-400 text-[11px] mt-0.5">
-                  Enter your Tripo3D key (from tripo3d.ai) to generate real, downloadable 3D models (.GLB, .OBJ, .USDZ) directly from character art.
-                </p>
-              </div>
-              <a
-                href="https://platform.tripo3d.ai/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 shrink-0"
-              >
-                Tripo Dashboard <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-            <div className="flex gap-2 items-center">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => handleSaveApiKey(e.target.value)}
-                placeholder="Paste your Tripo3D API key (tripo_... or tsk_...)..."
-                className="flex-1 bg-[#141720] border border-white/10 rounded-xl px-4 py-2.5 text-white placeholder-gray-600 font-mono text-xs focus:outline-none focus:border-blue-400"
-              />
-              {apiKey && (
-                <button
-                  type="button"
-                  onClick={() => handleSaveApiKey('')}
-                  className="px-3 py-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-medium font-mono"
-                >
-                  Clear Key
-                </button>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Studio Workspace */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-16">
