@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
 
   if (action === "list_blocked") {
     const { data } = await admin.from("generations")
-      .select("id,created_at,user_id,kind,prompt,block_reason")
+      .select("id,created_at,user_id,kind,prompt,block_reason,matched")
       .eq("blocked", true).order("created_at", { ascending: false }).limit(100);
     const rows = data ?? [];
     const map = await emails(rows.map((r) => r.user_id));
