@@ -23,21 +23,33 @@ const MINOR_PATTERNS: RegExp[] = [
   /\b([0-9]|1[0-7])[\s-]*(year|yr)s?[\s-]*old\b/i,
   /\bage[d]?\s*([0-9]|1[0-7])\b/i,
 ];
-// Tier 2: explicit sexual content -> 1 strike (warning, then lock on the second).
+// Tier 2: explicit sexual content / nudity -> immediate lock.
 const EXPLICIT_PATTERNS: RegExp[] = [
   /\b(nude|naked|nsfw|porn|pornographic|explicit|topless|genitals|erotic|hentai|xxx|fetish)\b/i,
   /\b(sex|sexual|sexually|orgasm|masturbat\w*)\b/i,
 ];
-// Tier 3: weapons / protected brands -> half strike.
+// Tier 3: trademarked characters / brands -> half strike.
 const HALF_PATTERNS: RegExp[] = [
-  /\b(gun|guns|rifle|pistol|firearm|machine gun|assault rifle|bomb|grenade)\b/i,
   /\b(marvel|disney|pixar|nintendo|pokemon|pok[eé]mon|dc comics|batman|superman|spider-?man|mickey mouse|star wars|harry potter)\b/i,
 ];
+
+// Harmless phrases that contain trigger words (colours, young animals, idioms).
+// They are removed before the minors check so they don't cause false alarms.
+const SAFE_PHRASES: RegExp[] = [
+  /\bbaby[\s-]*(blue|blues|pink|powder|yellow|green|purple|teal|bump)\b/gi,
+  /\bbaby[\s-]*(dragon|wyrm|wolf|bat|raven|crow|snake|serpent|fox|cat|tiger|lion|bear|owl|griffin|gryphon|phoenix|spider|shark|whale|elephant|deer|goat|bird)s?\b/gi,
+  /\bkid[\s-]*gloves?\b/gi,
+  /\bchild[\s-]*of[\s-]*the[\s-]*(night|moon|stars|void|shadows?|dark|darkness|forest|sea|sun|storm)\b/gi,
+];
+function stripSafe(text: string): string {
+  return SAFE_PHRASES.reduce((t, r) => t.replace(r, " "), text);
+}
 
 type Verdict = { ok: true } | { ok: false; reason: string; strikes: number; lock: boolean; message: string };
 
 function moderate(prompt: string): Verdict {
-  if (MINOR_PATTERNS.some((r) => r.test(prompt))) {
+  const cleaned = stripSafe(prompt);
+  if (MINOR_PATTERNS.some((r) => r.test(cleaned))) {
     return {
       ok: false, reason: "minors", strikes: LOCK_AT, lock: true,
       message: "This request involves minors, which is not allowed. Your account has been locked and will be reviewed.",
@@ -45,14 +57,14 @@ function moderate(prompt: string): Verdict {
   }
   if (EXPLICIT_PATTERNS.some((r) => r.test(prompt))) {
     return {
-      ok: false, reason: "explicit", strikes: 1, lock: false,
-      message: "This request was blocked: explicit content isn't allowed in Eidolon. A repeat will lock your account.",
+      ok: false, reason: "explicit", strikes: LOCK_AT, lock: true,
+      message: "Explicit content isn't allowed in Eidolon. Your account has been locked and will be reviewed.",
     };
   }
   if (HALF_PATTERNS.some((r) => r.test(prompt))) {
     return {
-      ok: false, reason: "weapons_or_brands", strikes: 0.5, lock: false,
-      message: "This request was blocked: weapons and trademarked characters/brands aren't supported. Please adjust your prompt.",
+      ok: false, reason: "brands", strikes: 0.5, lock: false,
+      message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt.",
     };
   }
   return { ok: true };
@@ -95,12 +107,13 @@ Deno.serve(async (req) => {
   // 3. Account state
   await admin.from("profiles").upsert({ id: user.id }, { onConflict: "id", ignoreDuplicates: true });
   const { data: profile } = await admin.from("profiles").select("*").eq("id", user.id).single();
-  if (profile?.locked) {
+  const isOwner = profile?.is_owner === true;
+  if (profile?.locked && !isOwner) {
     return json({ error: "Your account is locked pending review. Please contact support." }, 403);
   }
 
   // 4. Moderation
-  const verdict = moderate(prompt);
+  const verdict = isOwner ? ({ ok: true } as Verdict) : moderate(prompt);
   if (!verdict.ok) {
     const strikes = Math.max(Number(profile?.strikes ?? 0) + verdict.strikes, verdict.lock ? LOCK_AT : 0);
     const lock = verdict.lock || strikes >= LOCK_AT;
@@ -121,7 +134,7 @@ Deno.serve(async (req) => {
   const { count } = await admin.from("generations")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id).eq("blocked", false).eq("kind", "image").gte("created_at", since);
-  if ((count ?? 0) >= DAILY_LIMIT) {
+  if (!isOwner && (count ?? 0) >= DAILY_LIMIT) {
     return json({ error: `Daily limit of ${DAILY_LIMIT} images reached. Please come back tomorrow.` }, 429);
   }
 
