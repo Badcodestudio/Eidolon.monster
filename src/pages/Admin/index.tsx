@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
+import ModerationPanel from './ModerationPanel';
+import { invokeFunction } from '@/lib/api';
 import { getCommunityArtworks } from '@/lib/communityGallery';
 import { ARTWORK_GALLERY, Artwork } from '@/data/artworks';
 import {
@@ -11,7 +13,6 @@ import {
   Database,
   Trash2,
   Lock,
-  Unlock,
   CheckCircle2,
   TrendingUp,
   Cpu,
@@ -21,21 +22,40 @@ import {
 } from 'lucide-react';
 
 export default function AdminPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return sessionStorage.getItem('eidolon_admin_auth') === 'true';
-  });
-  const [passwordInput, setPasswordInput] = useState('');
+  // Access is decided by the server: only signed-in owner accounts get in.
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [authError, setAuthError] = useState('');
 
-  // Active tab inside admin dashboard
-  const [activeTab, setActiveTab] = useState<'overview' | 'tiers' | 'gallery' | 'telemetry' | 'api-keys'>('overview');
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      setChecking(true);
+      try {
+        await invokeFunction('admin', { action: 'whoami' });
+        if (!cancelled) {
+          setIsAuthenticated(true);
+          setAuthError('');
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setIsAuthenticated(false);
+          setAuthError(e instanceof Error ? e.message : 'Access denied.');
+        }
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    };
+    void check();
+    window.addEventListener('eidolon_user_updated', check);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('eidolon_user_updated', check);
+    };
+  }, []);
 
-  // Stored API key state
-  const [falKey, setFalKey] = useState<string>(() => localStorage.getItem('eidolon_fal_key') || '');
-  const [threeDKey, setThreeDKey] = useState<string>(() => localStorage.getItem('eidolon_3d_key') || '');
-  const [threeDProvider, setThreeDProvider] = useState<string>(() => localStorage.getItem('eidolon_3d_provider') || 'meshy');
-  const [keySavedMessage, setKeySavedMessage] = useState(false);
-  const [threeDKeySavedMessage, setThreeDKeySavedMessage] = useState(false);
+  // Active tab inside admin dashboard
+  const [activeTab, setActiveTab] = useState<'moderation' | 'overview' | 'tiers' | 'gallery' | 'telemetry' | 'api-keys'>('moderation');
 
   // Gallery state
   const [communityArtworks, setCommunityArtworks] = useState<Artwork[]>([]);
@@ -44,37 +64,8 @@ export default function AdminPage() {
     setCommunityArtworks(getCommunityArtworks());
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Local admin master verification
-    if (passwordInput.trim() === 'admin123' || passwordInput.trim().length >= 6) {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('eidolon_admin_auth', 'true');
-      setAuthError('');
-    } else {
-      setAuthError('Invalid credentials. Password must be at least 6 characters.');
-    }
-  };
-
   const handleLogout = () => {
     setIsAuthenticated(false);
-    sessionStorage.removeItem('eidolon_admin_auth');
-  };
-
-  const handleSaveKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('eidolon_fal_key', falKey.trim());
-    window.dispatchEvent(new Event('eidolon_falkey_updated'));
-    setKeySavedMessage(true);
-    setTimeout(() => setKeySavedMessage(false), 3000);
-  };
-
-  const handleSaveThreeDKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('eidolon_3d_key', threeDKey.trim());
-    localStorage.setItem('eidolon_3d_provider', threeDProvider);
-    setThreeDKeySavedMessage(true);
-    setTimeout(() => setThreeDKeySavedMessage(false), 3000);
   };
 
   const handleDeleteCommunityItem = (id: string) => {
@@ -137,39 +128,26 @@ export default function AdminPage() {
                 Admin Sovereignty Vault
               </h1>
               <p className="text-xs text-gray-400">
-                Enter your administrative key to inspect platform telemetry, active subscription tiers, and content moderation.
+                Owner access only. Moderation, accounts and platform tools.
               </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
-                  Admin Passkey
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full bg-[#141720] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400 font-mono"
-                />
-              </div>
-
-              {authError && (
-                <div className="text-xs text-red-400 font-mono bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
-                  {authError}
-                </div>
+            <div className="space-y-4 text-center">
+              {checking ? (
+                <p className="text-xs text-gray-400 font-mono">Checking access...</p>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    This area is for the studio owner. Sign in with your owner account (top menu), then this page opens by itself.
+                  </p>
+                  {authError && (
+                    <div className="text-xs text-red-400 font-mono bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+                      {authError}
+                    </div>
+                  )}
+                </>
               )}
-
-              <button
-                type="submit"
-                className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-widest rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
-              >
-                <Unlock className="w-4 h-4" />
-                Unlock Admin Console
-              </button>
-            </form>
+            </div>
           </div>
         ) : (
           /* Admin Dashboard Console */
@@ -247,6 +225,18 @@ export default function AdminPage() {
             {/* Navigation Tabs */}
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
               <button
+                onClick={() => setActiveTab('moderation')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
+                  activeTab === 'moderation'
+                    ? 'bg-emerald-500 text-black font-bold'
+                    : 'bg-[#12141D] border border-white/5 text-gray-400 hover:text-white'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Moderation
+              </button>
+
+              <button
                 onClick={() => setActiveTab('overview')}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
                   activeTab === 'overview'
@@ -294,6 +284,8 @@ export default function AdminPage() {
                 API & GPU Pipeline Keys
               </button>
             </div>
+
+            {activeTab === 'moderation' && <ModerationPanel />}
 
             {/* Tab 1: OVERVIEW */}
             {activeTab === 'overview' && (
@@ -470,113 +462,23 @@ export default function AdminPage() {
               </div>
             )}
 
-            {/* Tab 4: API & PIPELINE KEYS */}
+            {/* Tab 4: API & PIPELINE KEYS (now server-side) */}
             {activeTab === 'api-keys' && (
-              <div className="space-y-6 max-w-2xl">
-                {/* 2D FLUX Master Key */}
-                <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-6 sm:p-8 space-y-6">
-                  <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Key className="w-4 h-4 text-emerald-400" />
-                      Global fal.ai FLUX Pipeline Master Key
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Powers the character synthesis studio for image generation without exposing keys to clients.
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleSaveKey} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
-                        Supplier fal.ai Master Key
-                      </label>
-                      <input
-                        type="password"
-                        value={falKey}
-                        onChange={(e) => setFalKey(e.target.value)}
-                        placeholder="fal_key_..."
-                        className="w-full bg-[#141720] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400 font-mono"
-                      />
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        Any key saved here automatically unlocks live FLUX generation studio-wide for your visitors and subscribers.
-                      </p>
-                    </div>
-
-                    {keySavedMessage && (
-                      <div className="text-xs text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        FLUX master key saved into studio private storage!
-                      </div>
-                    )}
-
-                    <button
-                      type="submit"
-                      className="py-2.5 px-6 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-widest rounded-xl transition shadow-lg shadow-emerald-500/20"
-                    >
-                      Save FLUX Key
-                    </button>
-                  </form>
-                </div>
-
-                {/* 3D Model Generation Pipeline Key */}
-                <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-6 sm:p-8 space-y-6">
-                  <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-blue-400" />
-                      3D Model Synthesis API Key
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Connect your 3D generative pipeline (Meshy, Tripo3D, CSM, or fal.ai Trellis/Tripo) to power the upcoming 3D Models studio.
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleSaveThreeDKey} className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
-                          3D Provider
-                        </label>
-                        <select
-                          value={threeDProvider}
-                          onChange={(e) => setThreeDProvider(e.target.value)}
-                          className="w-full bg-[#141720] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400 font-mono"
-                        >
-                          <option value="meshy">Meshy.ai (Text/Image to 3D)</option>
-                          <option value="tripo">Tripo3D (Instant 3D Mesh)</option>
-                          <option value="fal-trellis">fal.ai Trellis (3D Assets)</option>
-                          <option value="csm">Common Sense Machines (CSM)</option>
-                          <option value="custom">Custom 3D Engine</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
-                          3D Pipeline API Key
-                        </label>
-                        <input
-                          type="password"
-                          value={threeDKey}
-                          onChange={(e) => setThreeDKey(e.target.value)}
-                          placeholder="msy_... or tripo_..."
-                          className="w-full bg-[#141720] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400 font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    {threeDKeySavedMessage && (
-                      <div className="text-xs text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        3D Pipeline Key and provider preferences saved!
-                      </div>
-                    )}
-
-                    <button
-                      type="submit"
-                      className="py-2.5 px-6 bg-blue-500 hover:bg-blue-400 text-white font-extrabold text-xs uppercase tracking-widest rounded-xl transition shadow-lg shadow-blue-500/20"
-                    >
-                      Save 3D Engine Key
-                    </button>
-                  </form>
+              <div className="space-y-4 max-w-2xl">
+                <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-6 sm:p-8 space-y-4">
+                  <p className="font-semibold text-white flex items-center gap-2">
+                    <Key className="w-4 h-4 text-emerald-400" />
+                    Pipeline keys live on the server
+                  </p>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Your fal.ai and Tripo3D keys are no longer stored in this browser. They are kept as
+                    secrets in Supabase (Edge Functions &rarr; Secrets) and only the server uses them.
+                  </p>
+                  <ul className="text-xs text-gray-300 font-mono space-y-1.5">
+                    <li>FAL_KEY &mdash; image generation</li>
+                    <li>TRIPO_KEY &mdash; 3D generation</li>
+                    <li>DAILY_IMAGE_LIMIT &mdash; optional, default 30</li>
+                  </ul>
                 </div>
               </div>
             )}
