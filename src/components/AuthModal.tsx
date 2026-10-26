@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import {
   X,
   Mail,
@@ -35,7 +36,39 @@ export function saveUserSession(user: UserSession | null) {
     localStorage.setItem('eidolon_user_session', JSON.stringify(user));
   } else {
     localStorage.removeItem('eidolon_user_session');
+    // Real sign-out: end the Supabase session too.
+    void supabase.auth.signOut();
   }
+  window.dispatchEvent(new Event('eidolon_user_updated'));
+}
+
+/**
+ * Mirrors the real Supabase session into the lightweight UserSession the
+ * navbar/sidebar read. Called once at app start and on every auth change.
+ */
+export async function syncUserSession() {
+  const { data } = await supabase.auth.getSession();
+  const user = data.session?.user;
+  if (!user) {
+    localStorage.removeItem('eidolon_user_session');
+    window.dispatchEvent(new Event('eidolon_user_updated'));
+    return;
+  }
+  let tier = 'Free';
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('plan')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (profile?.plan) tier = profile.plan;
+  const email = user.email ?? '';
+  const session: UserSession = {
+    email,
+    name: (user.user_metadata?.name as string | undefined) || email.split('@')[0],
+    tier,
+    credits: 0,
+  };
+  localStorage.setItem('eidolon_user_session', JSON.stringify(session));
   window.dispatchEvent(new Event('eidolon_user_updated'));
 }
 
@@ -67,7 +100,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -83,28 +116,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setLoading(true);
-
-    setTimeout(() => {
+    try {
+      if (mode === 'signup') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { name: name.trim() || email.split('@')[0] } },
+        });
+        if (signUpError) throw signUpError;
+        if (!data.session) {
+          setSuccess('Account created. Check your email to confirm it, then sign in.');
+          return;
+        }
+        setSuccess('Account created successfully! Welcome to Eidolon.');
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (signInError) throw signInError;
+        setSuccess('Signed in successfully. Welcome back!');
+      }
+      await syncUserSession();
+      setTimeout(() => onClose(), 1000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
       setLoading(false);
-      const displayName = name.trim() || email.split('@')[0];
-      const session: UserSession = {
-        email: email.trim(),
-        name: displayName,
-        tier: 'Creator Guild',
-        credits: 100,
-      };
-
-      saveUserSession(session);
-      setSuccess(
-        mode === 'signup'
-          ? 'Account created successfully! Welcome to Eidolon.'
-          : 'Signed in successfully. Welcome back!'
-      );
-
-      setTimeout(() => {
-        onClose();
-      }, 1000);
-    }, 600);
+    }
   };
 
   return (

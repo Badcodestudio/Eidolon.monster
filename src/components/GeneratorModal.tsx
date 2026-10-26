@@ -1,10 +1,9 @@
+import { supabase } from '@/lib/supabase';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Sparkles,
   RefreshCw,
-  Key,
-  ExternalLink,
   AlertCircle,
   Wand2,
   Compass,
@@ -717,34 +716,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavedToGallery, setIsSavedToGallery] = useState(false);
 
-  // fal.ai key configuration
-  const [falKey, setFalKey] = useState<string>(() => {
-    return localStorage.getItem('eidolon_fal_key') || '';
-  });
-  const [showKeyConfig, setShowKeyConfig] = useState(false);
-  const [keySavedIndicator, setKeySavedIndicator] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Re-sync falKey whenever modal opens or storage changes
-  useEffect(() => {
-    if (isOpen) {
-      const stored = localStorage.getItem('eidolon_fal_key') || '';
-      setFalKey(stored);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    const handleKeyUpdate = () => {
-      const updated = localStorage.getItem('eidolon_fal_key') || '';
-      setFalKey(updated);
-    };
-    window.addEventListener('storage', handleKeyUpdate);
-    window.addEventListener('eidolon_falkey_updated', handleKeyUpdate);
-    return () => {
-      window.removeEventListener('storage', handleKeyUpdate);
-      window.removeEventListener('eidolon_falkey_updated', handleKeyUpdate);
-    };
-  }, []);
 
   // Sync initialPrompt if provided
   useEffect(() => {
@@ -764,20 +736,6 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   };
 
   const selectedEntity = currentPantheon.entities.find((e) => e.name === selectedEntityName) || currentPantheon.entities[0];
-
-  const handleSaveFalKey = (key: string) => {
-    const trimmed = key.trim();
-    setFalKey(trimmed);
-    if (trimmed) {
-      localStorage.setItem('eidolon_fal_key', trimmed);
-      setKeySavedIndicator(true);
-      setTimeout(() => setKeySavedIndicator(false), 2500);
-    } else {
-      localStorage.removeItem('eidolon_fal_key');
-      setKeySavedIndicator(false);
-    }
-    window.dispatchEvent(new Event('eidolon_falkey_updated'));
-  };
 
   // Function to compile prompt based on current selections
   const compilePromptFromSelections = (
@@ -966,112 +924,68 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     // Use the prompt directly as visible on screen (which is assembled dynamically from all clicks and user edits)
     const fullPrompt = prompt.trim();
 
-    // If fal.ai key is supplied, run live FLUX generation through fal.ai
-    if (falKey.trim()) {
-      try {
-        setProgress(20);
-        setStatusMessage('Connecting to fal.ai GPU cluster...');
-
-        const targetRatio = RATIOS.find((r) => r.id === aspectRatio);
-        const imageSize = targetRatio ? targetRatio.falSize : 'portrait_4_3';
-
-        setProgress(50);
-        setStatusMessage(`Rendering ${selectedStyle} • ${archetypeMode} with FLUX...`);
-
-        const response = await fetch('https://fal.run/fal-ai/flux/schnell', {
-          method: 'POST',
-          headers: {
-            Authorization: `Key ${falKey.trim()}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            prompt: fullPrompt,
-            image_size: imageSize,
-            num_images: 1,
-            enable_safety_checker: false,
-          }),
-        });
-
-        setProgress(85);
-        setStatusMessage('Finalizing 8K master render...');
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result?.detail || result?.message || 'Failed to render on fal.ai. Please check your Key & credits.');
-        }
-
-        const generatedUrl = result.images?.[0]?.url;
-        if (!generatedUrl) {
-          throw new Error('fal.ai did not return an image URL.');
-        }
-
-        setProgress(100);
-        setGeneratedResult(generatedUrl);
-
-        // Automatically record to persistent generation history
-        const generatedTitle =
-          archetypeMode === 'Cosplay'
-            ? `${selectedEntity.name} (${selectedPantheonName})`
-            : `${selectedAnimal} Hybrid`;
-
-        saveToGenerationHistory({
-          imageUrl: generatedUrl,
-          prompt,
-          title: generatedTitle,
-          style: selectedStyle,
-          clothing: selectedClothing,
-          pantheon: selectedPantheonName,
-          aspectRatio: aspectRatio,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Unknown error during fal.ai generation';
-        setErrorMessage(msg);
-      } finally {
-        setIsGenerating(false);
+    // Generation runs on the server: it checks sign-in, moderation and limits,
+    // then calls fal.ai with the studio's own key. No key ever reaches the browser.
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        throw new Error('Please sign in to generate images.');
       }
-      return;
-    }
 
-    // Showcase demo generation simulation
-    setProgress(18);
-    setStatusMessage(`Compiling ${selectedStyle} + ${archetypeMode} syntax...`);
+      setProgress(25);
+      setStatusMessage('Sending to the Eidolon studio...');
 
-    setTimeout(() => {
-      setProgress(50);
-      setStatusMessage(`Synthesizing ${selectedLocation} environmental backdrop...`);
-    }, 700);
+      const targetRatio = RATIOS.find((r) => r.id === aspectRatio);
+      const imageSize = targetRatio ? targetRatio.falSize : 'portrait_4_3';
 
-    setTimeout(() => {
-      setProgress(82);
-      setStatusMessage(`Applying ${selectedLighting} shader passes...`);
-    }, 1500);
+      setProgress(55);
+      setStatusMessage(`Rendering ${selectedStyle} • ${archetypeMode}...`);
 
-    setTimeout(() => {
+      const { data, error } = await supabase.functions.invoke('generate-image', {
+        body: { prompt: fullPrompt, image_size: imageSize },
+      });
+
+      if (error) {
+        let detail = error.message;
+        try {
+          const ctx = (error as { context?: Response }).context;
+          if (ctx) {
+            const body = await ctx.json();
+            if (body?.error) detail = body.error;
+          }
+        } catch {
+          // keep default message
+        }
+        throw new Error(detail);
+      }
+
+      const generatedUrl: string | undefined = data?.url;
+      if (!generatedUrl) {
+        throw new Error('The studio did not return an image. Please try again.');
+      }
+
       setProgress(100);
-      setStatusMessage('Rendering 8K master preview...');
-    }, 2200);
+      setGeneratedResult(generatedUrl);
 
-    setTimeout(() => {
-      setIsGenerating(false);
-      const chosen = ARTWORK_GALLERY[Math.floor(Math.random() * ARTWORK_GALLERY.length)];
-      setGeneratedResult(chosen.imageUrl);
-
-      const simTitle =
+      const generatedTitle =
         archetypeMode === 'Cosplay'
           ? `${selectedEntity.name} (${selectedPantheonName})`
           : `${selectedAnimal} Hybrid`;
 
       saveToGenerationHistory({
-        imageUrl: chosen.imageUrl,
+        imageUrl: generatedUrl,
         prompt,
-        title: simTitle,
+        title: generatedTitle,
         style: selectedStyle,
         clothing: selectedClothing,
         pantheon: selectedPantheonName,
         aspectRatio: aspectRatio,
       });
-    }, 2600);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Generation failed. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -1090,22 +1004,10 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
               </p>
             </div>
             <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              {falKey ? 'FLUX Studio Engine Active' : 'Supplier Studio Mode'}
+              Studio Engine Online
             </span>
           </div>
           <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={() => setShowKeyConfig(!showKeyConfig)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                showKeyConfig || falKey
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'
-              }`}
-            >
-              <Key className="w-3.5 h-3.5" />
-              <span>{falKey ? 'Studio Supplier Key Active' : 'Configure fal.ai Key'}</span>
-            </button>
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -1114,54 +1016,6 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
             </button>
           </div>
         </div>
-
-        {/* fal.ai Drawer */}
-        {showKeyConfig && (
-          <div className="bg-[#12151E] border-b border-white/10 px-5 sm:px-6 py-4 animate-fade-in text-xs space-y-3">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-semibold text-white flex items-center gap-2">
-                  <Key className="w-4 h-4 text-emerald-400" />
-                  Supplier Studio Master Pipeline
-                </p>
-                <p className="text-gray-400 text-[11px] mt-0.5">
-                  You are the platform supplier: your connected fal.ai FLUX key powers live high-speed generation across the studio.
-                </p>
-              </div>
-              <a
-                href="https://fal.ai/dashboard/keys"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 shrink-0"
-              >
-                fal.ai Dashboard <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-            <div className="flex gap-2 items-center">
-              <input
-                type="password"
-                value={falKey}
-                onChange={(e) => handleSaveFalKey(e.target.value)}
-                placeholder="Paste your fal.ai API key..."
-                className="flex-1 bg-[#0A0C10] border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 font-mono text-xs focus:outline-none focus:border-emerald-400"
-              />
-              {keySavedIndicator && (
-                <span className="text-[10px] text-emerald-400 font-mono whitespace-nowrap bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
-                  Saved
-                </span>
-              )}
-              {falKey && (
-                <button
-                  type="button"
-                  onClick={() => handleSaveFalKey('')}
-                  className="px-3 py-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-medium"
-                >
-                  Clear Key
-                </button>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Content body */}
         <div className="grid grid-cols-1 lg:grid-cols-12 flex-1 overflow-y-auto">
