@@ -1,6 +1,6 @@
 // Supabase Edge Function: generate-3d
 // Two actions in one function:
-//   { action: "start",  mode: "image" | "prompt", image_url?, prompt?, topology?, polycount? }
+//   { action: "start",  mode: "image" | "prompt", image_url?, prompt?, topology?, polycount?, quality?: "standard" | "high" }
 //   { action: "status", task_id }
 // Checks sign-in, account lock, plan allowance and moderation, then talks to
 // Tripo3D with the studio's own key (secret TRIPO_KEY). The browser never sees it.
@@ -16,8 +16,7 @@ const CORS = {
 const TRIPO = "https://api.tripo3d.ai/v2/openapi/task";
 const LOCK_AT = 2;
 
-// Monthly 3D models included in each plan. Extra purchased models live in profiles.bonus_3d.
-const PLAN_ALLOWANCE: Record<string, number> = { Free: 0, Pro: 5 };
+// Monthly 3D allowance comes from the plans table. Extra purchased models live in profiles.bonus_3d.
 
 // ---- Moderation (same draft rules as generate-image: keep the two in sync) ----
 const MINOR_PATTERNS: RegExp[] = [
@@ -34,6 +33,17 @@ const EXPLICIT_PATTERNS: RegExp[] = [
 ];
 const HALF_PATTERNS: RegExp[] = [
   /\b(marvel|disney|pixar|nintendo|pokemon|pok[eé]mon|dc comics|batman|superman|spider-?man|mickey mouse|star wars|harry potter)\b/i,
+];
+
+// Tier 4: gratuitous gore / torture / mutilation (fal's policy forbids it) -> half strike.
+const GORE_PATTERNS: RegExp[] = [
+  /\b(gore|gory|mutilat\w*|dismember\w*|disembowel\w*|eviscerat\w*|decapitat\w*|torture[sd]?|torturing|entrails)\b/i,
+];
+// Tier 5: real people / deepfakes (fal's policy forbids likenesses of real people) -> half strike.
+// Starter list: add more names in Admin notes and here as you see them.
+const REAL_PERSON_PATTERNS: RegExp[] = [
+  /\b(deepfake|celebrity|celebrities|real person|real people|likeness of|lookalike of|photo of a real)\b/i,
+  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[e\u00e9]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
 ];
 
 // Harmless phrases that contain trigger words (colours, young animals, idioms).
@@ -76,9 +86,35 @@ function moderate(text: string): Verdict {
     return { matched: brandHits, ok: false, reason: "brands", strikes: 0.5, lock: false,
       message: "This request was blocked: trademarked characters and brands aren't supported. Please adjust your prompt." };
   }
+  const goreHits = hits(GORE_PATTERNS, text);
+  if (goreHits.length) {
+    return { matched: goreHits, ok: false, reason: "gore", strikes: 0.5, lock: false,
+      message: "This request was blocked: extreme gore, torture and mutilation aren't allowed. Please adjust your prompt." };
+  }
+  const personHits = hits(REAL_PERSON_PATTERNS, text);
+  if (personHits.length) {
+    return { matched: personHits, ok: false, reason: "real_person", strikes: 0.5, lock: false,
+      message: "This request was blocked: images of real people and celebrities aren't allowed. Please describe an original character instead." };
+  }
   return { ok: true };
 }
 // -----------------------------------------------------------------------------
+
+// Copy a file into our own storage so the link never expires. Returns the permanent URL, or null if the copy fails.
+// deno-lint-ignore no-explicit-any
+async function keepCopy(admin: any, from: string, path: string, contentType: string): Promise<string | null> {
+  try {
+    const r = await fetch(from);
+    if (!r.ok) throw new Error(`download ${r.status}`);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const up = await admin.storage.from("creations").upload(path, bytes, { contentType, upsert: true });
+    if (up.error) throw up.error;
+    return admin.storage.from("creations").getPublicUrl(path).data.publicUrl as string;
+  } catch (e) {
+    console.error("storage copy failed", path, String(e));
+    return null;
+  }
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -111,6 +147,11 @@ Deno.serve(async (req) => {
       .eq("task_id", taskId).eq("user_id", user.id).eq("kind", "3d").maybeSingle();
     if (!row) return json({ error: "Task not found." }, 404);
 
+    // Already finished and stored: no need to ask Tripo again.
+    if (row.status === "done" && row.result_url) {
+      return json({ status: "success", progress: 100, model_url: row.result_url, preview_url: row.preview_url ?? null });
+    }
+
     const r = await fetch(`${TRIPO}/${encodeURIComponent(taskId)}`, { headers: tripoHeaders });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j?.code) {
@@ -122,18 +163,22 @@ Deno.serve(async (req) => {
 
     if (status === "success") {
       const out = j?.data?.output ?? {};
-      const modelUrl: string | undefined = out.pbr_model ?? out.model ?? out.base_model;
-      if (row.status !== "done") {
-        await admin.from("generations").update({ status: "done", result_url: modelUrl ?? null }).eq("id", row.id);
-      }
-      return json({ status: "success", progress: 100, model_url: modelUrl, preview_url: out.rendered_image ?? null });
+      const tripoModel: string | undefined = out.pbr_model ?? out.model ?? out.base_model;
+      const tripoPreview: string | undefined = out.rendered_image;
+      if (!tripoModel) return json({ status: "running", progress: 99 });
+      // Keep permanent copies (Tripo links expire). If a copy fails we fall back to Tripo's link.
+      const modelUrl = (await keepCopy(admin, tripoModel, `${user.id}/${taskId}.glb`, "model/gltf-binary")) ?? tripoModel;
+      let previewUrl: string | null = tripoPreview ?? null;
+      if (tripoPreview) previewUrl = (await keepCopy(admin, tripoPreview, `${user.id}/${taskId}.webp`, "image/webp")) ?? tripoPreview;
+      await admin.from("generations").update({ status: "done", result_url: modelUrl, preview_url: previewUrl }).eq("id", row.id);
+      return json({ status: "success", progress: 100, model_url: modelUrl, preview_url: previewUrl });
     }
     if (["failed", "cancelled", "banned", "expired", "unknown"].includes(status)) {
       if (row.status !== "failed") {
         await admin.from("generations").update({ status: "failed" }).eq("id", row.id);
-        if (row.used_bonus) { // give back a purchased model if the task failed
+        if (row.used_bonus) { // give back purchased models if the task failed
           const { data: p } = await admin.from("profiles").select("bonus_3d").eq("id", user.id).single();
-          await admin.from("profiles").update({ bonus_3d: (p?.bonus_3d ?? 0) + 1 }).eq("id", user.id);
+          await admin.from("profiles").update({ bonus_3d: (p?.bonus_3d ?? 0) + Number(row.cost ?? 1) }).eq("id", user.id);
         }
       }
       return json({ status: "failed", progress, error: "The 3D engine could not build a model from this input. You have not been charged." });
@@ -179,37 +224,66 @@ Deno.serve(async (req) => {
     return json({ error: "Please enter a prompt." }, 400);
   }
 
-  // Allowance: monthly plan models first, then purchased bonus models.
-  const allowance = PLAN_ALLOWANCE[String(profile?.plan ?? "Free")] ?? 0;
+  const quality: "standard" | "high" = body.quality === "high" ? "high" : "standard";
+  const cost = quality === "high" ? 2 : 1; // a High-detail model uses 2 of the monthly 3D credits
+
+  // Allowance: monthly plan credits first, then purchased bonus credits.
+  const { data: planRow } = await admin.from("plans").select("models3d_per_month").eq("name", profile?.plan ?? "Free").maybeSingle();
+  const allowance = Number(planRow?.models3d_per_month ?? 0);
   const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
-  const { count } = await admin.from("generations").select("id", { count: "exact", head: true })
+  const { data: usedRows } = await admin.from("generations").select("cost")
     .eq("user_id", user.id).eq("kind", "3d").eq("blocked", false).eq("used_bonus", false)
     .neq("status", "failed").gte("created_at", monthStart.toISOString());
+  const usedUnits = (usedRows ?? []).reduce((n: number, r: { cost: number | null }) => n + Number(r.cost ?? 1), 0);
   let usedBonus = false;
-  if (!isOwner && (count ?? 0) >= allowance) {
-    if ((profile?.bonus_3d ?? 0) > 0) usedBonus = true;
+  if (!isOwner && usedUnits + cost > allowance) {
+    if (Number(profile?.bonus_3d ?? 0) >= cost) usedBonus = true;
     else return json({ error: allowance > 0
-      ? `You've used your ${allowance} 3D models for this month.`
-      : "3D models are included with the Pro plan. Upgrade to create 3D models." }, 402);
+      ? (quality === "high" && usedUnits < allowance
+          ? "You don't have enough 3D credits left for a High-detail model (it uses 2). Try Standard detail."
+          : `You've used your ${allowance} 3D credits for this month.`)
+      : "Free accounts can browse the gallery. Choose a plan to create 3D models." }, 402);
   }
 
   const payload: Record<string, unknown> = file
     ? { type: "image_to_model", file }
     : { type: "text_to_model", prompt };
-  payload.face_limit = body.polycount === "50k" ? 50000 : 18000;
+  const tier = parseInt(String(body.polycount ?? ""), 10); // "20k (Mobile)", "50k (Console)", "120k (Cinematic)"
+  payload.face_limit = tier === 120 ? 120000 : tier === 50 ? 50000 : tier === 20 ? 20000 : 18000;
   if (body.topology === "quad") payload.quad = true;
+  if (quality === "high") { payload.texture_quality = "detailed"; payload.geometry_quality = "detailed"; }
 
+  // 1) Record the job FIRST, so a model is never started (and paid for) without a record of it.
+  const { data: made, error: recErr } = await admin.from("generations").insert({
+    user_id: user.id, kind: "3d", prompt: prompt || imageUrl, status: "pending",
+    used_bonus: usedBonus, ip, quality, cost,
+  }).select("id").single();
+  if (recErr || !made) {
+    console.error("could not record 3d job (nothing was started)", recErr?.message);
+    return json({ error: "Something went wrong saving your request. Nothing was started and you have not been charged. Please try again." +
+      (isOwner ? ` [DB: ${recErr?.message}]` : "") }, 500);
+  }
+
+  // 2) Start the Tripo job.
   const r = await fetch(TRIPO, { method: "POST", headers: tripoHeaders, body: JSON.stringify(payload) });
   const j = await r.json().catch(() => ({}));
   const taskId: string | undefined = j?.data?.task_id;
   if (!r.ok || j?.code || !taskId) {
     console.error("tripo start error", r.status, JSON.stringify(j).slice(0, 500));
-    return json({ error: "The 3D engine is unavailable right now. You have not been charged. Please try again soon." }, 502);
+    await admin.from("generations").delete().eq("id", made.id);
+    // The owner sees Tripo's real answer so problems can be fixed fast; customers get the friendly message.
+    const detail = isOwner ? ` [Tripo ${r.status}: ${JSON.stringify(j).slice(0, 300)}]` : "";
+    return json({ error: "The 3D engine is unavailable right now. You have not been charged. Please try again soon." + detail }, 502);
   }
 
-  if (usedBonus) await admin.from("profiles").update({ bonus_3d: (profile!.bonus_3d as number) - 1 }).eq("id", user.id);
-  await admin.from("generations").insert({
-    user_id: user.id, kind: "3d", prompt: prompt || imageUrl, task_id: taskId, status: "running", used_bonus: usedBonus, ip,
-  });
-  return json({ task_id: taskId });
+  // 3) Attach the Tripo task id (retry once; if it still fails, log it loudly).
+  let upd = await admin.from("generations").update({ task_id: taskId, status: "running" }).eq("id", made.id);
+  if (upd.error) upd = await admin.from("generations").update({ task_id: taskId, status: "running" }).eq("id", made.id);
+  if (upd.error) {
+    console.error("LOST TASK: tripo started but could not save task id", taskId, upd.error.message);
+    return json({ error: "Your model started but we couldn't track it. Please contact support with this code: " + taskId }, 500);
+  }
+
+  if (usedBonus) await admin.from("profiles").update({ bonus_3d: Number(profile!.bonus_3d) - cost }).eq("id", user.id);
+  return json({ task_id: taskId, quality, cost });
 });
