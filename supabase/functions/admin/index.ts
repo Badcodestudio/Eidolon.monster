@@ -10,7 +10,6 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PLANS = ["Free", "Pro"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -50,6 +49,25 @@ Deno.serve(async (req) => {
       if (!data?.users || data.users.length < 200) break;
     }
     return null;
+  }
+
+  if (action === "list_plans") {
+    const { data } = await admin.from("plans").select("*").order("sort");
+    return json({ plans: data ?? [] });
+  }
+  if (action === "save_plan") {
+    const name = String(body.name ?? "");
+    const num = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.trunc(Number(v ?? 0))));
+    const { error } = await admin.from("plans").update({
+      price_cents: num(body.price_cents, 1_000_000),
+      images_per_month: num(body.images_per_month, 1_000_000),
+      images_high_per_month: num(body.images_high_per_month, 1_000_000),
+      models3d_per_month: num(body.models3d_per_month, 100_000),
+      description: String(body.description ?? "").slice(0, 300),
+      active: body.active !== false,
+    }).eq("name", name);
+    if (error) return json({ error: "Could not save." }, 400);
+    return json({ ok: true });
   }
 
   if (action === "whoami") return json({ ok: true, email: u.user.email });
@@ -96,7 +114,8 @@ Deno.serve(async (req) => {
   }
   if (action === "set_plan") {
     const plan = String(body.plan ?? "");
-    if (!PLANS.includes(plan)) return json({ error: "Unknown plan." }, 400);
+    const { data: exists } = await admin.from("plans").select("name").eq("name", plan).maybeSingle();
+    if (!exists) return json({ error: "Unknown plan." }, 400);
     await admin.from("profiles").update({ plan }).eq("id", userId);
     return json({ ok: true });
   }
