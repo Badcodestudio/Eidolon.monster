@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { UsageBadge } from '@/components/UsageBadge';
+import { loadUsage, notifyUsageChanged, useUsage } from '@/lib/usage';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
@@ -119,7 +121,7 @@ export interface CompanionCategory {
 
 export const COMPANION_COLLECTIONS: CompanionCategory[] = [
   {
-    category: '18+ Creature Combos (Freaky Underworld)',
+    category: 'Dark Creature Combos',
     items: [
       'None',
       'Black wolf with glowing sigil collar',
@@ -198,7 +200,7 @@ export const COMPANION_COLLECTIONS: CompanionCategory[] = [
   },
 ];
 
-// Hybrid & Freaky Underworld Traits Options
+// Hybrid & Underworld Traits Options
 const HYBRID_TRAIT_OPTIONS = [
   { id: 'horns', label: 'Thorn Horns / Ram Horns', desc: 'Twisted, thorny, bleeding demon horns piercing through halo' },
   { id: 'wings', label: 'Torn Bat Wings', desc: 'Tattered demonic bat wings & skeletal ribbing' },
@@ -573,7 +575,10 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
   // Dark Familiars, Predators/Mounts, Myth/Gothic, Ethereal Companions
   const [selectedCompanionCategory, setSelectedCompanionCategory] = useState<string>(() => {
-    return localStorage.getItem('eidolon_gen_comp_cat') || 'Dark Familiars (Money Makers)';
+    const saved = localStorage.getItem('eidolon_gen_comp_cat');
+    // An older version used a different category name; fall back gracefully.
+    if (saved === '18+ Creature Combos (Freaky Underworld)') return 'Dark Creature Combos';
+    return saved || 'Dark Familiars (Money Makers)';
   });
   const [selectedCompanion, setSelectedCompanion] = useState<string>(() => {
     return localStorage.getItem('eidolon_gen_comp') || 'None';
@@ -615,6 +620,15 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   const [selectedQuality, setSelectedQuality] = useState<string>(() => {
     return localStorage.getItem('eidolon_gen_quality') || 'wallpaper';
   });
+
+  // Image engine tier the person pays for: Standard (fast, cheaper) or High (better detail and backgrounds).
+  const [engineTier, setEngineTier] = useState<'standard' | 'high'>(() => {
+    return localStorage.getItem('eidolon_engine_tier') === 'high' ? 'high' : 'standard';
+  });
+  useEffect(() => {
+    localStorage.setItem('eidolon_engine_tier', engineTier);
+  }, [engineTier]);
+  const { usage: tierUsage } = useUsage();
 
   // Generated Result persistence across navigation
   const [generatedResult, setGeneratedResult] = useState<string | null>(() => {
@@ -931,6 +945,22 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       if (!sessionData.session) {
         throw new Error('Please sign in to generate images.');
       }
+      const usageNow = await loadUsage();
+      if (usageNow && !usageNow.isOwner) {
+        if (usageNow.imagesLimit <= 0 && usageNow.imagesHighLimit <= 0) {
+          throw new Error('Free accounts can browse the gallery. Choose a plan to generate images.');
+        }
+        if (engineTier === 'high') {
+          if (usageNow.imagesHighLimit <= 0) {
+            throw new Error("High quality isn't included in your plan. Choose Standard, or upgrade your plan.");
+          }
+          if (usageNow.imagesHighUsed >= usageNow.imagesHighLimit) {
+            throw new Error(`You've used all ${usageNow.imagesHighLimit} High-quality images this month. Try Standard.`);
+          }
+        } else if (usageNow.imagesUsed >= usageNow.imagesLimit) {
+          throw new Error(`You've used all ${usageNow.imagesLimit} Standard images this month.`);
+        }
+      }
 
       setProgress(25);
       setStatusMessage('Sending to the Eidolon studio...');
@@ -942,7 +972,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       setStatusMessage(`Rendering ${selectedStyle} • ${archetypeMode}...`);
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
-        body: { prompt: fullPrompt, image_size: imageSize },
+        body: { prompt: fullPrompt, image_size: imageSize, quality: engineTier },
       });
 
       if (error) {
@@ -985,6 +1015,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       setErrorMessage(err instanceof Error ? err.message : 'Generation failed. Please try again.');
     } finally {
       setIsGenerating(false);
+      notifyUsageChanged();
     }
   };
 
@@ -1003,9 +1034,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                 Streamlined Parametric Character Studio
               </p>
             </div>
-            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              Studio Engine Online
-            </span>
+            <UsageBadge kind="image" />
           </div>
           <div className="flex items-center space-x-2">
             <button
@@ -1741,6 +1770,38 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                   className="w-full bg-[#141720] border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition font-mono leading-relaxed"
                   required
                 />
+              </div>
+
+              {/* Image quality tier (counted separately on your plan) */}
+              <div className="space-y-1.5">
+                <label className="text-xs uppercase tracking-wider text-emerald-400 font-bold">Image quality</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['standard', 'high'] as const).map((t) => {
+                    const left =
+                      tierUsage && !tierUsage.isOwner
+                        ? t === 'high'
+                          ? Math.max(0, tierUsage.imagesHighLimit - tierUsage.imagesHighUsed)
+                          : Math.max(0, tierUsage.imagesLimit - tierUsage.imagesUsed)
+                        : null;
+                    const off = tierUsage && !tierUsage.isOwner && (t === 'high' ? tierUsage.imagesHighLimit <= 0 : tierUsage.imagesLimit <= 0);
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        disabled={!!off}
+                        onClick={() => setEngineTier(t)}
+                        className={`rounded-xl px-3 py-2 text-xs font-semibold tracking-wide transition border disabled:opacity-40 disabled:cursor-not-allowed ${
+                          engineTier === t
+                            ? 'bg-emerald-500/15 border-emerald-400 text-emerald-300'
+                            : 'bg-[#141720] border-white/10 text-gray-300 hover:border-white/20'
+                        }`}
+                      >
+                        {t === 'high' ? 'High quality' : 'Standard'}
+                        {left !== null ? <span className="ml-1.5 font-mono text-[10px] opacity-70">{off ? 'not in plan' : `${left} left`}</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Submit Button */}
