@@ -182,7 +182,7 @@ export default function AdminPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
                 <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
-                  <span>Monthly Recurring (est.)</span>
+                  <span>Monthly Recurring (est., CAD)</span>
                   <TrendingUp className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div className="text-2xl font-bold text-white font-mono">{stats ? money(mrr) : '...'}</div>
