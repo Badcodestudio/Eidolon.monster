@@ -7,6 +7,9 @@ interface Plan {
   price_cents: number;
   images_per_month: number;
   images_high_per_month: number;
+  stripe_buy_button_id?: string | null;
+  stripe_publishable_key?: string | null;
+  stripe_price_id?: string | null;
   models3d_per_month: number;
   description: string;
   active: boolean;
@@ -110,6 +113,20 @@ export default function PlansPanel() {
                 value={p.models3d_per_month}
                 onChange={(e) => edit(p.name, { models3d_per_month: Number(e.target.value || 0) })}
               />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-[11px] font-mono text-gray-400 space-y-1">
+              <span>Stripe buy button id (buy_btn_...)</span>
+              <input className={input} value={p.stripe_buy_button_id ?? ''} autoCapitalize="off" onChange={(e) => edit(p.name, { stripe_buy_button_id: e.target.value })} />
+            </label>
+            <label className="text-[11px] font-mono text-gray-400 space-y-1">
+              <span>Stripe publishable key (pk_...)</span>
+              <input className={input} value={p.stripe_publishable_key ?? ''} autoCapitalize="off" onChange={(e) => edit(p.name, { stripe_publishable_key: e.target.value })} />
+            </label>
+            <label className="text-[11px] font-mono text-gray-400 space-y-1">
+              <span>Stripe price id (price_...)</span>
+              <input className={input} value={p.stripe_price_id ?? ''} autoCapitalize="off" onChange={(e) => edit(p.name, { stripe_price_id: e.target.value })} />
             </label>
           </div>
           <label className="text-[11px] font-mono text-gray-400 space-y-1 block">

@@ -179,7 +179,7 @@ export default function ModerationPanel() {
             <AccountRow a={found} />
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-gray-300">
               <span>Plan:</span>
-              {['Free', 'Pro'].map((p) => (
+              {['Free', 'Apprentice', 'Archetype Pro', 'Studio Guild'].map((p) => (
                 <button
                   key={p}
                   className={`${btn} ${found.plan === p ? 'border-emerald-500 text-emerald-300' : 'border-white/15 text-gray-300'}`}
