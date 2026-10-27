@@ -64,6 +64,9 @@ Deno.serve(async (req) => {
       images_high_per_month: num(body.images_high_per_month, 1_000_000),
       models3d_per_month: num(body.models3d_per_month, 100_000),
       description: String(body.description ?? "").slice(0, 300),
+      stripe_buy_button_id: String(body.stripe_buy_button_id ?? "").trim().slice(0, 100) || null,
+      stripe_publishable_key: String(body.stripe_publishable_key ?? "").trim().slice(0, 300) || null,
+      stripe_price_id: String(body.stripe_price_id ?? "").trim().slice(0, 100) || null,
       active: body.active !== false,
     }).eq("name", name);
     if (error) return json({ error: "Could not save." }, 400);
