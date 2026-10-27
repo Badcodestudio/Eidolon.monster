@@ -225,13 +225,8 @@ Deno.serve(async (req) => {
     await admin.from("generations").insert({
       user_id: user.id, prompt, blocked: true, block_reason: "engine_safety", ip,
     });
-    // A small strike: one false alarm never matters, but repeatedly pushing at the engine's checker does.
-    if (!isOwner) {
-      const strikes = Number(profile?.strikes ?? 0) + 0.25;
-      await admin.from("profiles").update({
-        strikes, locked: strikes >= LOCK_AT, lock_reason: strikes >= LOCK_AT ? "engine_safety" : profile?.lock_reason ?? null,
-      }).eq("id", user.id);
-    }
+    // No strike: fal's checker judges the finished picture and false-alarms often. Only our own checks
+    // (above, before anything is generated) count against an account. This is logged for the owner to review.
     return json({ error: "The image engine declined this prompt. Please change it and try again." }, 422);
   }
 
