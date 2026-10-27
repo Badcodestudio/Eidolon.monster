@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { TERMS_VERSION } from '@/lib/legal';
 import { supabase } from '@/lib/supabase';
 import {
   X,
@@ -117,7 +118,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     if (mode === 'signup' && !adultConfirmed) {
-      setError('Eidolon is for adults only. Please confirm you are 18 or older.');
+      setError('Please confirm you are 18 or older and agree to the Terms to create an account.');
       return;
     }
 
@@ -131,6 +132,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             data: {
               name: name.trim() || email.split('@')[0],
               adult_confirmed_at: new Date().toISOString(),
+              terms_version: TERMS_VERSION,
+              terms_accepted_at: new Date().toISOString(),
             },
           },
         });
@@ -305,7 +308,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 onChange={(e) => setAdultConfirmed(e.target.checked)}
                 className="mt-0.5 accent-emerald-500"
               />
-              <span>I confirm that I am 18 years of age or older. Eidolon is for adults only.</span>
+              <span>
+                I confirm that I am 18 years of age or older, and I agree to the{' '}
+                <a href="/legal" target="_blank" rel="noreferrer" className="text-emerald-400 underline">Terms</a>,{' '}
+                <a href="/legal?tab=aup" target="_blank" rel="noreferrer" className="text-emerald-400 underline">Acceptable Use &amp; 18+ rules</a>{' '}
+                and{' '}
+                <a href="/legal?tab=privacy" target="_blank" rel="noreferrer" className="text-emerald-400 underline">Privacy Policy</a>.
+                Eidolon is for adults only; sexual content and images of minors or real people are not allowed.
+              </span>
             </label>
           )}
 
