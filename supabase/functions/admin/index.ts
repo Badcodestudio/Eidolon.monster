@@ -70,6 +70,31 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  if (action === "stats") {
+    const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
+    const since = monthStart.toISOString();
+    const count = async (q: PromiseLike<{ count: number | null }>) => (await q).count ?? 0;
+    const [accounts, locked, imgStd, imgHigh, blocked, notes] = await Promise.all([
+      count(admin.from("profiles").select("id", { count: "exact", head: true })),
+      count(admin.from("profiles").select("id", { count: "exact", head: true }).eq("locked", true)),
+      count(admin.from("generations").select("id", { count: "exact", head: true }).eq("kind", "image").eq("blocked", false).eq("quality", "standard").gte("created_at", since)),
+      count(admin.from("generations").select("id", { count: "exact", head: true }).eq("kind", "image").eq("blocked", false).eq("quality", "high").gte("created_at", since)),
+      count(admin.from("generations").select("id", { count: "exact", head: true }).eq("blocked", true).not("block_reason", "like", "note:%").gte("created_at", since)),
+      count(admin.from("generations").select("id", { count: "exact", head: true }).like("block_reason", "note:%").gte("created_at", since)),
+    ]);
+    const { data: rows3d } = await admin.from("generations").select("cost")
+      .eq("kind", "3d").eq("blocked", false).neq("status", "failed").gte("created_at", since);
+    const credits3d = (rows3d ?? []).reduce((n: number, r: { cost: number | null }) => n + Number(r.cost ?? 1), 0);
+    const { data: planRows } = await admin.from("plans").select("name,price_cents").order("sort");
+    const { data: profs } = await admin.from("profiles").select("plan,is_owner");
+    const byPlan: Record<string, number> = {};
+    for (const p of profs ?? []) if (!p.is_owner) byPlan[p.plan ?? "Free"] = (byPlan[p.plan ?? "Free"] ?? 0) + 1;
+    const plans = (planRows ?? []).map((p: { name: string; price_cents: number }) => ({
+      name: p.name, price_cents: p.price_cents, subscribers: byPlan[p.name] ?? 0,
+    }));
+    return json({ accounts, locked, imgStd, imgHigh, credits3d, blocked, notes, plans });
+  }
+
   if (action === "whoami") return json({ ok: true, email: u.user.email });
 
   if (action === "list_flagged") {
