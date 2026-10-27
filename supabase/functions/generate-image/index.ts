@@ -1,4 +1,3 @@
-
 // Supabase Edge Function: generate-image
 // Checks sign-in, account lock, daily limit and moderation, then calls fal.ai
 // with the studio's own key (secret FAL_KEY). The browser never sees the key.
@@ -44,7 +43,7 @@ const GORE_PATTERNS: RegExp[] = [
 // Starter list: add more names in Admin notes and here as you see them.
 const REAL_PERSON_PATTERNS: RegExp[] = [
   /\b(deepfake|celebrity|celebrities|real person|real people|likeness of|lookalike of|photo of a real)\b/i,
-  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[e\u00e9]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
+  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[eé]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
 ];
 
 // Harmless phrases that contain trigger words (colours, young animals, idioms).
