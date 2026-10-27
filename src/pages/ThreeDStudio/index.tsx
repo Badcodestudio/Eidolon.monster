@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
 import { invokeFunction } from '@/lib/api';
+import { UsageBadge } from '@/components/UsageBadge';
+import { loadUsage, notifyUsageChanged } from '@/lib/usage';
 import {
   Box,
   Sparkles,
@@ -18,6 +20,8 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+const ModelViewer = lazy(() => import('@/components/ModelViewer'));
+
 export default function ThreeDStudioPage() {
   const [searchParams] = useSearchParams();
   const initialImage = searchParams.get('imageUrl') || 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935413853_0.png?imageMogr2/format/webp';
@@ -30,6 +34,7 @@ export default function ThreeDStudioPage() {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [artStyle, setArtStyle] = useState('realistic');
   const [topology, setTopology] = useState('quad');
+  const [detail, setDetail] = useState<'standard' | 'high'>('standard');
   const [targetPolycount, setTargetPolycount] = useState('50k');
   const [isGenerating, setIsGenerating] = useState(false);
   const [tripoStatus, setTripoStatus] = useState<string>('');
@@ -80,6 +85,18 @@ export default function ThreeDStudioPage() {
       if (!sessionData.session) {
         throw new Error('Please sign in to create 3D models.');
       }
+      const usageNow = await loadUsage();
+      if (usageNow && !usageNow.isOwner && usageNow.modelsLimit <= 0 && usageNow.bonus3d <= 0) {
+        throw new Error('Free accounts can browse the gallery. Choose a plan to create 3D models.');
+      }
+      const needed = detail === 'high' ? 2 : 1;
+      if (usageNow && !usageNow.isOwner && usageNow.modelsLimit - usageNow.modelsUsed + usageNow.bonus3d < needed) {
+        throw new Error(
+          detail === 'high'
+            ? "You don't have enough 3D credits left for a High-detail model (it uses 2). Try Standard detail."
+            : 'You have used all of your 3D credits for this month.'
+        );
+      }
 
       // The server checks your plan, runs moderation and holds the Tripo key.
       const start = await invokeFunction<{ task_id?: string }>('generate-3d', {
@@ -89,6 +106,7 @@ export default function ThreeDStudioPage() {
         prompt,
         topology,
         polycount: targetPolycount,
+        quality: detail,
       });
       const taskId = start.task_id;
       if (!taskId) throw new Error('The 3D studio did not accept the request.');
@@ -109,9 +127,9 @@ export default function ThreeDStudioPage() {
         if (check.status === 'success') {
           setGeneratedModel({
             title: prompt.slice(0, 36) || 'Synthesized 3D Asset',
-            format: 'GLB / USDZ / OBJ',
-            polycount: targetPolycount === '50k' ? '~50,000 faces' : '~18,000 faces',
-            textureMap: 'PBR Metallic-Roughness',
+            format: 'GLB',
+            polycount: `Target ${targetPolycount.split(' ')[0]} faces`,
+            textureMap: detail === 'high' ? 'High-detail PBR textures' : 'PBR textures',
             previewUrl: check.preview_url || imageUrl,
             modelUrl: check.model_url || undefined,
           });
@@ -128,6 +146,7 @@ export default function ThreeDStudioPage() {
     } finally {
       setIsGenerating(false);
       setTripoStatus('');
+      notifyUsageChanged();
     }
   };
 
@@ -176,10 +195,7 @@ export default function ThreeDStudioPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-mono flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Live Pipeline
-            </span>
+            <UsageBadge kind="3d" />
           </div>
         </div>
 
@@ -340,6 +356,31 @@ export default function ThreeDStudioPage() {
 
               <div>
                 <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
+                  Model detail
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ['standard', 'Standard (1 credit)'],
+                    ['high', 'High detail (2 credits)'],
+                  ] as const).map(([id, label]) => (
+                    <button
+                      type="button"
+                      key={id}
+                      onClick={() => setDetail(id)}
+                      className={`py-2 px-2 rounded-xl text-[11px] font-mono transition text-center ${
+                        detail === id
+                          ? 'bg-blue-500 text-white font-bold'
+                          : 'bg-[#141720] text-gray-400 border border-white/5 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
                   Target Polycount Tier
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -427,18 +468,36 @@ export default function ThreeDStudioPage() {
 
               {generatedModel && (
                 <div className="relative z-10 text-center space-y-4 max-w-md">
-                  <div className="relative mx-auto w-64 h-64 rounded-2xl overflow-hidden border border-blue-500/30 shadow-2xl group">
-                    <img
-                      src={generatedModel.previewUrl}
-                      alt={generatedModel.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                    />
-                    <div className="absolute inset-0 bg-blue-500/10 group-hover:opacity-0 transition-opacity" />
-                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-blue-300 border border-blue-500/30 flex items-center gap-1">
-                      <Eye className="w-3 h-3" />
-                      <span>Inspect 3D</span>
+                  {generatedModel.modelUrl ? (
+                    <div className="relative mx-auto w-72 h-72 sm:w-80 sm:h-80 rounded-2xl overflow-hidden border border-blue-500/30 shadow-2xl bg-[#0B0D13]">
+                      <Suspense
+                        fallback={
+                          <div className="w-full h-full flex items-center justify-center text-xs font-mono text-blue-300">
+                            Loading 3D viewer...
+                          </div>
+                        }
+                      >
+                        <ModelViewer
+                          url={generatedModel.modelUrl}
+                          fallback={
+                            <img src={generatedModel.previewUrl} alt={generatedModel.title} className="w-full h-full object-cover" />
+                          }
+                        />
+                      </Suspense>
+                      <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-blue-300 border border-blue-500/30 flex items-center gap-1 pointer-events-none">
+                        <Eye className="w-3 h-3" />
+                        <span>Drag to rotate &bull; pinch to zoom</span>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="relative mx-auto w-64 h-64 rounded-2xl overflow-hidden border border-blue-500/30 shadow-2xl">
+                      <img
+                        src={generatedModel.previewUrl}
+                        alt={generatedModel.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <h3 className="text-base font-bold text-white font-sans">
@@ -456,7 +515,7 @@ export default function ThreeDStudioPage() {
             <div className="p-4 border-t border-white/10 bg-[#0B0D13] flex flex-wrap items-center justify-between gap-3 z-10">
               <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
                 <FileCode className="w-4 h-4 text-blue-400" />
-                <span>Export: .GLB, .FBX, .OBJ, .USDZ</span>
+                <span>Export: .GLB</span>
               </div>
 
               <div className="flex items-center gap-2">
