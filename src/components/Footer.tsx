@@ -59,9 +59,9 @@ export const Footer: React.FC = () => {
             <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-white mb-4">Legal</h4>
             <ul className="space-y-2.5 text-xs text-gray-400">
               <li><Link to="/legal" className="hover:text-emerald-400 transition-colors">Terms of Service</Link></li>
-              <li><Link to="/legal" className="hover:text-emerald-400 transition-colors">Privacy Policy</Link></li>
-              <li><Link to="/legal" className="hover:text-emerald-400 transition-colors">Refund & Billing</Link></li>
-              <li><Link to="/legal" className="hover:text-emerald-400 transition-colors">Content & 18+ Rules</Link></li>
+              <li><Link to="/legal?tab=privacy" className="hover:text-emerald-400 transition-colors">Privacy Policy</Link></li>
+              <li><Link to="/legal?tab=billing" className="hover:text-emerald-400 transition-colors">Refund & Billing</Link></li>
+              <li><Link to="/legal?tab=aup" className="hover:text-emerald-400 transition-colors">Content & 18+ Rules</Link></li>
               <li><span className="inline-block mt-2 px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-gray-400">Age 18+ Only</span></li>
             </ul>
           </div>
