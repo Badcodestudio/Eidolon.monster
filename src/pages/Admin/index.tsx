@@ -2,24 +2,34 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import ModerationPanel from './ModerationPanel';
+import PlansPanel from './PlansPanel';
 import { invokeFunction } from '@/lib/api';
 import { getCommunityArtworks } from '@/lib/communityGallery';
-import { ARTWORK_GALLERY, Artwork } from '@/data/artworks';
+import { Artwork } from '@/data/artworks';
 import {
   ShieldAlert,
   Key,
   CreditCard,
   Layers,
-  Database,
   Trash2,
   Lock,
-  CheckCircle2,
   TrendingUp,
   Cpu,
   Eye,
   RefreshCw,
   Sliders,
 } from 'lucide-react';
+
+interface Stats {
+  accounts: number;
+  locked: number;
+  imgStd: number;
+  imgHigh: number;
+  credits3d: number;
+  blocked: number;
+  notes: number;
+  plans: { name: string; price_cents: number; subscribers: number }[];
+}
 
 export default function AdminPage() {
   // Access is decided by the server: only signed-in owner accounts get in.
@@ -55,7 +65,7 @@ export default function AdminPage() {
   }, []);
 
   // Active tab inside admin dashboard
-  const [activeTab, setActiveTab] = useState<'moderation' | 'overview' | 'tiers' | 'gallery' | 'telemetry' | 'api-keys'>('moderation');
+  const [activeTab, setActiveTab] = useState<'moderation' | 'plans' | 'overview' | 'gallery' | 'telemetry' | 'api-keys'>('moderation');
 
   // Gallery state
   const [communityArtworks, setCommunityArtworks] = useState<Artwork[]>([]);
@@ -75,42 +85,26 @@ export default function AdminPage() {
     window.dispatchEvent(new Event('eidolon_gallery_updated'));
   };
 
-  // Subscription tiers configured for badcode.studio
-  const tiers = [
-    {
-      id: 'apprentice',
-      name: 'APPRENTICE',
-      price: '$19 / month',
-      allocation: '800 Fast Generations / mo',
-      target: 'Independent concept artists & character designers',
-      activeSubscribers: 142,
-      mrr: '$2,698',
-      stripeId: 'buy_btn_1UUTYiHqofjXeuB9uFYlE91y',
-      status: 'Live & Accepting Payments',
-    },
-    {
-      id: 'archetype-pro',
-      name: 'ARCHETYPE PRO',
-      price: '$49 / month',
-      allocation: '2,500 Ultra-Fast Generations / mo',
-      target: 'Worldbuilders, game creators & studio leads',
-      activeSubscribers: 318,
-      mrr: '$15,582',
-      stripeId: 'buy_btn_1UUTYiHqofjXeuB9uFYlE91y',
-      status: 'Live & Accepting Payments (Most Popular)',
-    },
-    {
-      id: 'studio-guild',
-      name: 'STUDIO GUILD',
-      price: '$129 / month',
-      allocation: 'Unlimited Standard / 8,000 Turbo',
-      target: 'Indie gaming studios & tabletop creative guilds',
-      activeSubscribers: 46,
-      mrr: '$5,934',
-      stripeId: 'buy_btn_1UUTYiHqofjXeuB9uFYlE91y',
-      status: 'Live & Accepting Payments',
-    },
-  ];
+  // Real numbers from the database (owner-only server call).
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [statsError, setStatsError] = useState('');
+  const loadStats = async () => {
+    try {
+      setStats(await invokeFunction<Stats>('admin', { action: 'stats' }));
+      setStatsError('');
+    } catch (e) {
+      setStatsError(e instanceof Error ? e.message : 'Could not load the numbers.');
+    }
+  };
+  useEffect(() => {
+    if (isAuthenticated) void loadStats();
+  }, [isAuthenticated]);
+
+  const paying = stats ? stats.plans.filter((p) => p.price_cents > 0).reduce((n, p) => n + p.subscribers, 0) : 0;
+  const mrr = stats ? stats.plans.reduce((n, p) => n + p.price_cents * p.subscribers, 0) / 100 : 0;
+  // Rough cost estimate using what we know so far: ~0.3 cents per Standard image, ~0.5 cents per High image, 35 cents per 3D credit.
+  const estCost = stats ? stats.imgStd * 0.003 + stats.imgHigh * 0.005 + stats.credits3d * 0.35 : 0;
+  const money = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="min-h-screen bg-[#08090C] text-[#E6E8EC]">
@@ -160,13 +154,13 @@ export default function AdminPage() {
                   Operator Console &bull; badcode.studio
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white font-sans">
-                  Platform Telemetry & System Overview
+                  Owner Console
                 </h1>
               </div>
 
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setCommunityArtworks(getCommunityArtworks())}
+                  onClick={() => { setCommunityArtworks(getCommunityArtworks()); void loadStats(); }}
                   className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-mono text-gray-300 hover:text-white flex items-center gap-1.5 transition"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -181,44 +175,45 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Quick Metrics Cards */}
+            {/* Quick Metrics Cards (real numbers) */}
+            {statsError && (
+              <div className="text-xs text-red-400 font-mono bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">{statsError}</div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
                 <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
-                  <span>Monthly Recurring</span>
+                  <span>Monthly Recurring (est.)</span>
                   <TrendingUp className="w-4 h-4 text-emerald-400" />
                 </div>
-                <div className="text-2xl font-bold text-white font-mono">$24,214</div>
-                <div className="text-[11px] text-emerald-400 mt-1 font-mono">+18.4% from last month</div>
+                <div className="text-2xl font-bold text-white font-mono">{stats ? money(mrr) : '...'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">Plan price x accounts on that plan</div>
               </div>
 
               <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
                 <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
-                  <span>Active Subscribers</span>
+                  <span>Paying accounts</span>
                   <CreditCard className="w-4 h-4 text-blue-400" />
                 </div>
-                <div className="text-2xl font-bold text-white font-mono">506 Creators</div>
-                <div className="text-[11px] text-gray-400 mt-1">Across 3 live tiers</div>
+                <div className="text-2xl font-bold text-white font-mono">{stats ? paying : '...'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">{stats ? `${stats.accounts} accounts in total` : ''}</div>
               </div>
 
               <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
                 <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
-                  <span>Community Creations</span>
-                  <Database className="w-4 h-4 text-purple-400" />
-                </div>
-                <div className="text-2xl font-bold text-white font-mono">
-                  {communityArtworks.length + ARTWORK_GALLERY.length}
-                </div>
-                <div className="text-[11px] text-gray-400 mt-1">Saved & published pieces</div>
-              </div>
-
-              <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
-                <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
-                  <span>GPU Synthesis Engine</span>
+                  <span>Est. provider cost (month)</span>
                   <Cpu className="w-4 h-4 text-amber-400" />
                 </div>
-                <div className="text-2xl font-bold text-white font-mono">fal.ai FLUX</div>
-                <div className="text-[11px] text-emerald-400 mt-1 font-mono">Operational &bull; 99.9% uptime</div>
+                <div className="text-2xl font-bold text-white font-mono">{stats ? money(estCost) : '...'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">fal + Tripo, rough estimate</div>
+              </div>
+
+              <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-5">
+                <div className="flex items-center justify-between text-gray-400 text-xs font-mono mb-2">
+                  <span>Blocked / locked</span>
+                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                </div>
+                <div className="text-2xl font-bold text-white font-mono">{stats ? `${stats.blocked} / ${stats.locked}` : '...'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">Blocked prompts this month / locked accounts</div>
               </div>
             </div>
 
@@ -237,6 +232,18 @@ export default function AdminPage() {
               </button>
 
               <button
+                onClick={() => setActiveTab('plans')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
+                  activeTab === 'plans'
+                    ? 'bg-emerald-500 text-black font-bold'
+                    : 'bg-[#12141D] border border-white/5 text-gray-400 hover:text-white'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                Plans &amp; limits
+              </button>
+
+              <button
                 onClick={() => setActiveTab('overview')}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
                   activeTab === 'overview'
@@ -246,18 +253,6 @@ export default function AdminPage() {
               >
                 <Layers className="w-3.5 h-3.5" />
                 Overview
-              </button>
-
-              <button
-                onClick={() => setActiveTab('tiers')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
-                  activeTab === 'tiers'
-                    ? 'bg-emerald-500 text-black font-bold'
-                    : 'bg-[#12141D] border border-white/5 text-gray-400 hover:text-white'
-                }`}
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                Pricing Tiers & Stripe
               </button>
 
               <button
@@ -286,35 +281,36 @@ export default function AdminPage() {
             </div>
 
             {activeTab === 'moderation' && <ModerationPanel />}
+            {activeTab === 'plans' && <PlansPanel />}
 
-            {/* Tab 1: OVERVIEW */}
+            {/* Tab: OVERVIEW (real numbers) */}
             {activeTab === 'overview' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-6 space-y-4">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <Sliders className="w-4 h-4 text-emerald-400" />
-                    Generator & Studio Configuration
+                    This month
                   </h3>
                   <div className="space-y-2.5 text-xs text-gray-300 font-mono">
                     <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Model Inference Pipeline</span>
-                      <span className="text-emerald-400">fal-ai/flux/schnell</span>
+                      <span className="text-gray-400">Standard images</span>
+                      <span className="text-white">{stats ? stats.imgStd : '...'}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Integrated Pantheons</span>
-                      <span className="text-white">10 Pantheons + Fae / RPG Classes</span>
+                      <span className="text-gray-400">High-quality images</span>
+                      <span className="text-white">{stats ? stats.imgHigh : '...'}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Available Hybrid Animals</span>
-                      <span className="text-white">12 Animals + 8 Trait Filters</span>
+                      <span className="text-gray-400">3D credits used</span>
+                      <span className="text-white">{stats ? stats.credits3d : '...'}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Atmospheric & Epic Scenes</span>
-                      <span className="text-white">15 Curated Worlds + Custom Input</span>
+                      <span className="text-gray-400">Gore notes (allowed, for review)</span>
+                      <span className="text-white">{stats ? stats.notes : '...'}</span>
                     </div>
                     <div className="flex justify-between py-2">
-                      <span className="text-gray-400">Supported Aspect Ratios</span>
-                      <span className="text-white">1:1, 4:5, 3:4, 9:16, 16:9, 21:9</span>
+                      <span className="text-gray-400">Image engines</span>
+                      <span className="text-emerald-400">Standard: FLUX schnell &bull; High: Z Image Turbo</span>
                     </div>
                   </div>
                 </div>
@@ -322,79 +318,20 @@ export default function AdminPage() {
                 <div className="bg-[#0E1015] border border-white/10 rounded-2xl p-6 space-y-4">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <CreditCard className="w-4 h-4 text-blue-400" />
-                    Stripe Merchant Connection
+                    Accounts per plan
                   </h3>
                   <div className="space-y-2.5 text-xs text-gray-300 font-mono">
-                    <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Merchant Account</span>
-                      <span className="text-white font-bold">badcode.studio</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Active Buy Button ID</span>
-                      <span className="text-emerald-400">buy_btn_1UUTYiHqofjXeuB9uFYlE91y</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-b border-white/5">
-                      <span className="text-gray-400">Publishable Key</span>
-                      <span className="text-gray-400 truncate max-w-[200px]">pk_test_51UFZI...4SkGrw</span>
-                    </div>
-                    <div className="flex justify-between py-2">
-                      <span className="text-gray-400">Checkout Mode</span>
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Live Embedded Stripe Drawer
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Tab 2: TIERS & PRICING */}
-            {activeTab === 'tiers' && (
-              <div className="space-y-4">
-                <div className="bg-[#0E1015] border border-white/10 rounded-2xl overflow-hidden">
-                  <div className="p-5 border-b border-white/10">
-                    <h3 className="text-base font-bold text-white">Active Subscription Tiers & What They Include</h3>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Direct mapping between your subscription tiers and Stripe checkout buttons.
-                    </p>
-                  </div>
-
-                  <div className="divide-y divide-white/5">
-                    {tiers.map((tier) => (
-                      <div key={tier.id} className="p-6 hover:bg-white/[0.02] transition">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          <div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-lg font-bold text-white font-mono">{tier.name}</span>
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono">
-                                {tier.price}
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-300 mt-1.5 font-medium">
-                              Allocation: <strong className="text-white">{tier.allocation}</strong>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Audience: {tier.target}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-6">
-                            <div className="text-right">
-                              <div className="text-xs text-gray-400">Active Creators</div>
-                              <div className="text-sm font-bold text-white font-mono">{tier.activeSubscribers}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-400">Monthly Revenue</div>
-                              <div className="text-sm font-bold text-emerald-400 font-mono">{tier.mrr}</div>
-                            </div>
-                            <div className="text-right font-mono text-[11px] text-gray-400">
-                              Stripe ID: <span className="text-white">{tier.stripeId}</span>
-                            </div>
-                          </div>
-                        </div>
+                    {stats?.plans.map((p) => (
+                      <div key={p.name} className="flex justify-between py-2 border-b border-white/5">
+                        <span className="text-gray-400">
+                          {p.name} ({p.price_cents > 0 ? `$${(p.price_cents / 100).toFixed(2)}/mo` : 'free'})
+                        </span>
+                        <span className="text-white">{p.subscribers}</span>
                       </div>
                     ))}
+                    <p className="text-[11px] text-gray-500 pt-1">
+                      Payments are not connected yet, so paying accounts are the ones you set to a plan by hand. Owner accounts are not counted.
+                    </p>
                   </div>
                 </div>
               </div>
