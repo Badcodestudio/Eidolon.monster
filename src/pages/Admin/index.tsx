@@ -3,6 +3,7 @@ import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import ModerationPanel from './ModerationPanel';
 import PlansPanel from './PlansPanel';
+import UsersPanel from './UsersPanel';
 import { invokeFunction } from '@/lib/api';
 import { getCommunityArtworks } from '@/lib/communityGallery';
 import { Artwork } from '@/data/artworks';
@@ -18,6 +19,7 @@ import {
   Eye,
   RefreshCw,
   Sliders,
+  Users,
 } from 'lucide-react';
 
 interface Stats {
@@ -65,7 +67,7 @@ export default function AdminPage() {
   }, []);
 
   // Active tab inside admin dashboard
-  const [activeTab, setActiveTab] = useState<'moderation' | 'plans' | 'overview' | 'gallery' | 'telemetry' | 'api-keys'>('moderation');
+  const [activeTab, setActiveTab] = useState<'moderation' | 'users' | 'plans' | 'overview' | 'gallery' | 'telemetry' | 'api-keys'>('moderation');
 
   // Gallery state
   const [communityArtworks, setCommunityArtworks] = useState<Artwork[]>([]);
@@ -232,6 +234,18 @@ export default function AdminPage() {
               </button>
 
               <button
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
+                  activeTab === 'users'
+                    ? 'bg-emerald-500 text-black font-bold'
+                    : 'bg-[#12141D] border border-white/5 text-gray-400 hover:text-white'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                Users
+              </button>
+
+              <button
                 onClick={() => setActiveTab('plans')}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider transition ${
                   activeTab === 'plans'
@@ -281,6 +295,7 @@ export default function AdminPage() {
             </div>
 
             {activeTab === 'moderation' && <ModerationPanel />}
+            {activeTab === 'users' && <UsersPanel />}
             {activeTab === 'plans' && <PlansPanel />}
 
             {/* Tab: OVERVIEW (real numbers) */}
