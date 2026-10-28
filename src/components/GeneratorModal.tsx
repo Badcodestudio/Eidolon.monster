@@ -772,11 +772,14 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     refUrl: string | null,
     refTitle: string
   ) => {
-    const genderTerm = gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
-
     // Tight framings must not mention body parts that are out of frame (the model would draw them).
     const closeUp = framing === 'close up portrait';
     const halfBody = framing === 'half body';
+    // The word "figure" pulls models toward full-length shots, so tight framings say woman/man/character instead.
+    const genderTerm =
+      closeUp || halfBody
+        ? gender === 'Female' ? 'woman' : gender === 'Male' ? 'man' : 'character'
+        : gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
     const visibleTraits = traits.filter((t) =>
       closeUp ? !['legs', 'tail', 'arms'].includes(t) : halfBody ? !['legs'].includes(t) : true
     );
@@ -824,10 +827,18 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       return closeUp ? 'ornate gothic collar and neckline' : 'ornate gothic bodice';
     })();
 
-    const effectiveLocation =
+    const rawLocation =
       location === 'Custom Location'
         ? customLocation.trim() || 'custom atmospheric setting'
         : location;
+    // In a close-up the background is only a soft blur behind the head, so it can't pull the camera back.
+    const effectiveLocation = closeUp ? `softly blurred background of ${rawLocation}` : rawLocation;
+    // Repeated at the end of the prompt so the crop line is the last thing the model reads too.
+    const cropTail = closeUp
+      ? 'bust portrait crop, frame ends at the collarbone'
+      : halfBody
+      ? 'waist-up crop, frame ends at the belt line'
+      : '';
 
     // Image models drift toward full-body shots, so each framing is described positively (negatives like "no legs"
     // tend to draw legs), out-of-frame clothing/traits are removed above, and the framing is placed first in the prompt.
@@ -857,6 +868,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       `Setting: ${effectiveLocation}`,
       `Lighting: ${lighting}`,
       qualityDesc,
+      cropTail,
     ];
 
     if (refUrl && refTitle) {
