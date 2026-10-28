@@ -815,14 +815,16 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
         ? customLocation.trim() || 'custom atmospheric setting'
         : location;
 
+    // Image models drift toward full-body shots, so each framing says what is IN and what is OUT of the frame,
+    // and it is placed first in the prompt (models weigh early words most).
     const framingDesc =
       framing === 'close up portrait'
-        ? 'close up portrait, intimate focus on facial expression, eyes and ornate headpiece'
+        ? 'extreme close-up portrait, head and shoulders only, face fills the frame, cropped at the collarbone, no torso, no legs, no hands visible, intimate focus on facial expression, eyes and ornate headpiece'
         : framing === 'half body'
-        ? 'half body shot from waist up, prominent armor and garment details'
+        ? 'medium shot framed from the waist up, cropped at the hips, no legs and no feet visible, prominent armor and garment details'
         : framing === 'epic'
-        ? 'epic wide cinematic perspective, towering heroic presence within vast environment'
-        : 'full body shot from head to toe, dramatic grounded stance';
+        ? 'epic ultra-wide cinematic establishing shot, the figure small against a vast towering environment, grand scale, atmospheric depth'
+        : 'full-length shot showing the entire body from head to toe including boots and feet, dramatic grounded stance';
 
     const qualityDesc =
       quality === 'wallpaper'
@@ -832,12 +834,12 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
         : 'standard clean render, balanced studio dynamic range';
 
     const parts = [
+      framingDesc,
       `${style} art style`,
       genderTerm,
       archetypeDesc,
       companionDesc,
       `Attire: ${effectiveClothing}`,
-      framingDesc,
       `Setting: ${effectiveLocation}`,
       `Lighting: ${lighting}`,
       qualityDesc,
