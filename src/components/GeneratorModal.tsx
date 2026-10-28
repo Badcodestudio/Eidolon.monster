@@ -774,9 +774,15 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   ) => {
     const genderTerm = gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
 
+    // Tight framings must not mention body parts that are out of frame (the model would draw them).
+    const closeUp = framing === 'close up portrait';
+    const halfBody = framing === 'half body';
+    const visibleTraits = traits.filter((t) =>
+      closeUp ? !['legs', 'tail', 'arms'].includes(t) : halfBody ? !['legs'].includes(t) : true
+    );
     const traitsDesc =
-      traits.length > 0
-        ? `distinct animal features (${traits.map(t => {
+      visibleTraits.length > 0
+        ? `distinct animal features (${visibleTraits.map(t => {
             const match = HYBRID_TRAIT_OPTIONS.find(opt => opt.id === t);
             return match ? match.label.toLowerCase() : t;
           }).join(', ')})`
@@ -801,27 +807,35 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     }
 
     const companionDesc =
-      companion && companion !== 'None'
+      companion && companion !== 'None' && !closeUp
         ? `Accompanied by companion: ${companionPositioning}`
         : '';
 
-    const effectiveClothing =
+    const fullClothing =
       clothing === 'Custom Attire'
         ? customClothing.trim() || 'custom signature attire'
         : clothing;
+    // For close-up and half-body shots, leave out clothing pieces below the frame (boots, skirts, thigh-highs...).
+    const LOWER_BODY = /boot|thigh|skirt|knee|shorts|leg|hose|stocking|heel|garter|platform|train|hoof|hooves|paw|toe|tail/i;
+    const effectiveClothing = (() => {
+      if (!closeUp && !halfBody) return fullClothing;
+      const kept = fullClothing.split(/,\s*|\s+&\s+/).filter((seg) => !LOWER_BODY.test(seg));
+      if (kept.length > 0) return kept.join(', ');
+      return closeUp ? 'ornate gothic collar and neckline' : 'ornate gothic bodice';
+    })();
 
     const effectiveLocation =
       location === 'Custom Location'
         ? customLocation.trim() || 'custom atmospheric setting'
         : location;
 
-    // Image models drift toward full-body shots, so each framing says what is IN and what is OUT of the frame,
-    // and it is placed first in the prompt (models weigh early words most).
+    // Image models drift toward full-body shots, so each framing is described positively (negatives like "no legs"
+    // tend to draw legs), out-of-frame clothing/traits are removed above, and the framing is placed first in the prompt.
     const framingDesc =
       framing === 'close up portrait'
-        ? 'extreme close-up portrait, head and shoulders only, face fills the frame, cropped at the collarbone, no torso, no legs, no hands visible, intimate focus on facial expression, eyes and ornate headpiece'
+        ? 'tight close-up headshot portrait, face and headpiece fill the whole frame, shoulders cropped at the neckline, shallow depth of field, intimate focus on facial expression and eyes'
         : framing === 'half body'
-        ? 'medium shot framed from the waist up, cropped at the hips, no legs and no feet visible, prominent armor and garment details'
+        ? 'medium waist-up portrait, framed at the belt line, upper body and arms, prominent armor and garment details'
         : framing === 'epic'
         ? 'epic ultra-wide cinematic establishing shot, the figure small against a vast towering environment, grand scale, atmospheric depth'
         : 'full-length shot showing the entire body from head to toe including boots and feet, dramatic grounded stance';
