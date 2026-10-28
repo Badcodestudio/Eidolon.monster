@@ -117,6 +117,28 @@ Deno.serve(async (req) => {
     return json({ items: rows.map((r) => ({ ...r, email: map[r.user_id] })) });
   }
 
+  // Browse accounts (newest first). Optional text filter on the email. Returns up to 100 with their profile data.
+  if (action === "list_users") {
+    const q = String(body.q ?? "").trim().toLowerCase();
+    const all: { id: string; email: string; created_at: string; last_sign_in_at: string | null }[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const { data } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+      for (const x of data?.users ?? []) {
+        all.push({ id: x.id, email: x.email ?? x.id, created_at: x.created_at, last_sign_in_at: x.last_sign_in_at ?? null });
+      }
+      if (!data?.users || data.users.length < 200) break;
+    }
+    const rows = all
+      .filter((x) => !q || x.email.toLowerCase().includes(q))
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .slice(0, 100);
+    const { data: profs } = rows.length
+      ? await admin.from("profiles").select("*").in("id", rows.map((r) => r.id))
+      : { data: [] as Record<string, unknown>[] };
+    const byId = new Map((profs ?? []).map((p: Record<string, unknown>): [string, Record<string, unknown>] => [p.id as string, p]));
+    return json({ total: all.length, accounts: rows.map((r) => ({ ...(byId.get(r.id) ?? { id: r.id }), ...r })) });
+  }
+
   if (action === "find_user") {
     const id = await findUserId(String(body.email ?? ""));
     if (!id) return json({ error: "No account with that email." }, 404);
