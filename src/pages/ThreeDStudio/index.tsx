@@ -213,7 +213,7 @@ export default function ThreeDStudioPage() {
                 Tripo3D Mesh Pipeline
               </h2>
               <span className="text-[10px] font-mono text-blue-400 font-semibold bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                Tripo3D v2.0
+                Tripo3D
               </span>
             </div>
 
