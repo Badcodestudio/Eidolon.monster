@@ -534,6 +534,27 @@ const RATIOS = [
   { id: '21:9', label: '21:9 Ultrawide Wallpaper', falSize: 'landscape_16_9' },
 ] as const;
 
+// Crops the top-centre square (share `frac` of the width) of an image URL and returns it as a JPEG blob.
+async function cropUrlToJpeg(src: string, frac: number): Promise<Blob> {
+  const img = new window.Image();
+  img.crossOrigin = 'anonymous';
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('load'));
+    img.src = src;
+  });
+  const eff = Math.min(frac, img.naturalHeight / img.naturalWidth);
+  const side = Math.round(img.naturalWidth * eff);
+  const sx = Math.round((img.naturalWidth - side) / 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = side;
+  canvas.height = side;
+  canvas.getContext('2d')!.drawImage(img, sx, 0, side, side, 0, 0, side, side);
+  const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  if (!blob) throw new Error('blob');
+  return blob;
+}
+
 export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   isOpen,
   onClose,
@@ -1076,7 +1097,33 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
       setProgress(100);
       setGeneratedResult(generatedUrl);
-      setResultCrop(selectedFraming === 'close up portrait' ? 0.55 : selectedFraming === 'half body' ? 0.72 : null);
+      // Only Close Up and Half Body are cropped. Full Body and Epic keep crop = null and are never touched.
+      const cropFrac = selectedFraming === 'close up portrait' ? 0.55 : selectedFraming === 'half body' ? 0.72 : null;
+      setResultCrop(cropFrac);
+      let finalUrl = generatedUrl;
+      if (cropFrac) {
+        // Store the cropped copy so history, community gallery and 3D all use it. Any failure keeps the original
+        // image with the on-screen crop, exactly as before.
+        try {
+          const blob = await cropUrlToJpeg(generatedUrl, cropFrac);
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+            fr.onerror = () => reject(new Error('read'));
+            fr.readAsDataURL(blob);
+          });
+          const { data: cropData, error: cropErr } = await supabase.functions.invoke('save-crop', {
+            body: { original_url: generatedUrl, image_base64: b64 },
+          });
+          if (!cropErr && cropData?.url) {
+            finalUrl = cropData.url as string;
+            setGeneratedResult(finalUrl);
+            setResultCrop(null); // already cropped, so no on-screen crop needed
+          }
+        } catch {
+          // keep the original with the on-screen crop
+        }
+      }
 
       const generatedTitle =
         archetypeMode === 'Cosplay'
@@ -1084,7 +1131,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
           : `${selectedAnimal} Hybrid`;
 
       saveToGenerationHistory({
-        imageUrl: generatedUrl,
+        imageUrl: finalUrl,
         prompt,
         title: generatedTitle,
         style: selectedStyle,
