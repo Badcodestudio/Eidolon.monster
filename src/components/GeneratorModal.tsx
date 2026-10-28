@@ -1045,7 +1045,8 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       setStatusMessage('Sending to the Eidolon studio...');
 
       const targetRatio = RATIOS.find((r) => r.id === aspectRatio);
-      const imageSize = targetRatio ? targetRatio.falSize : 'portrait_4_3';
+      // Tall frames invite a full body, so Close Up is always requested square (the on-screen crop does the rest).
+      const imageSize = selectedFraming === 'close up portrait' ? 'square_hd' : targetRatio ? targetRatio.falSize : 'portrait_4_3';
 
       setProgress(55);
       setStatusMessage(`Rendering ${selectedStyle} • ${archetypeMode}...`);
