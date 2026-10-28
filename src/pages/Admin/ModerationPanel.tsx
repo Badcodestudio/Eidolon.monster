@@ -11,6 +11,8 @@ interface Account {
   lock_reason?: string | null;
   bonus_3d?: number;
   is_owner?: boolean;
+  created_at?: string;
+  last_sign_in_at?: string | null;
 }
 
 interface BlockedItem {
@@ -21,6 +23,7 @@ interface BlockedItem {
   prompt: string | null;
   block_reason: string | null;
   matched?: string | null;
+  user_id?: string;
 }
 
 
@@ -55,6 +58,9 @@ export default function ModerationPanel() {
   const [flagged, setFlagged] = useState<Account[]>([]);
   const [blocked, setBlocked] = useState<BlockedItem[]>([]);
   const [found, setFound] = useState<Account | null>(null);
+  const [users, setUsers] = useState<Account[]>([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [userFilter, setUserFilter] = useState('');
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -90,6 +96,17 @@ export default function ModerationPanel() {
     }
   };
 
+  const loadUsers = async (q: string) => {
+    setMsg('');
+    try {
+      const r = await invokeFunction<{ accounts: Account[]; total: number }>('admin', { action: 'list_users', q });
+      setUsers(r.accounts);
+      setUsersTotal(r.total);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not load accounts.');
+    }
+  };
+
   const lookup = async (email: string) => {
     try {
       const r = await invokeFunction<{ account: Account }>('admin', { action: 'find_user', email });
@@ -119,7 +136,7 @@ export default function ModerationPanel() {
             onClick={() => act({ action: 'unlock', user_id: a.id }, found?.id === a.id ? found.email : undefined)}
           >
             <Unlock className="inline w-3 h-3 mr-1" />
-            Unlock
+            Pardon (unlock)
           </button>
         ) : (
           <button
@@ -198,6 +215,50 @@ export default function ModerationPanel() {
       </div>
 
       <div className={card}>
+        <p className="text-xs font-semibold text-white">Browse accounts{usersTotal ? ` (${usersTotal} total)` : ''}</p>
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void loadUsers(userFilter.trim());
+          }}
+        >
+          <input
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value)}
+            placeholder="part of an email (blank = newest 100)"
+            className="flex-1 bg-[#141720] border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-400"
+          />
+          <button type="submit" className={`${btn} border-emerald-500/40 text-emerald-300`}>
+            <Search className="inline w-3 h-3 mr-1" />
+            List
+          </button>
+        </form>
+        {users.map((u) => (
+          <div key={u.id} className="border border-white/10 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs text-white font-mono break-all">{u.email ?? u.id}</div>
+              <div className="text-[11px] font-mono text-gray-400">
+                {u.plan ?? 'Free'} &bull; strikes {u.strikes ?? 0}
+                {u.locked ? ' • LOCKED' : ''}
+                {u.is_owner ? ' • owner' : ''}
+                {u.created_at ? ` • joined ${new Date(u.created_at).toLocaleDateString()}` : ''}
+              </div>
+            </div>
+            <button
+              className={`${btn} border-white/15 text-gray-200 hover:bg-white/5`}
+              onClick={() => {
+                setFound(u);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            >
+              Manage
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className={card}>
         <p className="text-xs font-semibold text-white">Locked or flagged accounts ({flagged.length})</p>
         {flagged.length === 0 && <p className="text-xs text-gray-500">None right now.</p>}
         {flagged.map((a) => (
@@ -224,6 +285,15 @@ export default function ModerationPanel() {
             )}
             {b.matched && (
               <p className="text-[11px] text-red-300 font-mono">Tripped on: {b.matched}</p>
+            )}
+            {b.user_id && (
+              <button
+                className={`${btn} border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10`}
+                onClick={() => act({ action: 'unlock', user_id: b.user_id })}
+              >
+                <Unlock className="inline w-3 h-3 mr-1" />
+                Pardon this user
+              </button>
             )}
           </div>
         ))}
