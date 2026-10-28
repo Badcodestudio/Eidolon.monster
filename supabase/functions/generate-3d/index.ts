@@ -13,7 +13,10 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const TRIPO = "https://api.tripo3d.ai/v2/openapi/task";
+// Tripo API v3 (international). v2 shuts down Nov 1 2026.
+const TRIPO = "https://openapi.tripo3d.ai/v3";
+// model_version is REQUIRED on v3. This is the v2 default, so results and pricing stay the same.
+const MODEL_VERSION = "v2.5-20250123";
 const LOCK_AT = 2;
 
 // Monthly 3D allowance comes from the plans table. Extra purchased models live in profiles.bonus_3d.
@@ -157,7 +160,7 @@ Deno.serve(async (req) => {
       return json({ status: "success", progress: 100, model_url: row.result_url, preview_url: row.preview_url ?? null });
     }
 
-    const r = await fetch(`${TRIPO}/${encodeURIComponent(taskId)}`, { headers: tripoHeaders });
+    const r = await fetch(`${TRIPO}/tasks/${encodeURIComponent(taskId)}`, { headers: tripoHeaders });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j?.code) {
       console.error("tripo status error", r.status, JSON.stringify(j).slice(0, 400));
@@ -168,8 +171,8 @@ Deno.serve(async (req) => {
 
     if (status === "success") {
       const out = j?.data?.output ?? {};
-      const tripoModel: string | undefined = out.pbr_model ?? out.model ?? out.base_model;
-      const tripoPreview: string | undefined = out.rendered_image;
+      const tripoModel: string | undefined = out.model_url;
+      const tripoPreview: string | undefined = out.rendered_image_url;
       if (!tripoModel) return json({ status: "running", progress: 99 });
       // Keep permanent copies (Tripo links expire). If a copy fails we fall back to Tripo's link.
       const modelUrl = (await keepCopy(admin, tripoModel, `${user.id}/${taskId}.glb`, "model/gltf-binary")) ?? tripoModel;
@@ -178,7 +181,9 @@ Deno.serve(async (req) => {
       await admin.from("generations").update({ status: "done", result_url: modelUrl, preview_url: previewUrl }).eq("id", row.id);
       return json({ status: "success", progress: 100, model_url: modelUrl, preview_url: previewUrl });
     }
-    if (["failed", "cancelled", "banned", "expired", "unknown"].includes(status)) {
+    // v3 statuses: queued | running | success | failed | cancelled. A refused picture (2008) or a queue timeout (2018) now arrive as "failed".
+    if (["failed", "cancelled", "unknown"].includes(status)) {
+      console.error("tripo task failed", taskId, j?.data?.error_code, j?.data?.error_message);
       if (row.status !== "failed") {
         await admin.from("generations").update({ status: "failed" }).eq("id", row.id);
         if (row.used_bonus) { // give back purchased models if the task failed
@@ -257,8 +262,8 @@ Deno.serve(async (req) => {
   }
 
   const payload: Record<string, unknown> = file
-    ? { type: "image_to_model", file }
-    : { type: "text_to_model", prompt };
+    ? { file, model_version: MODEL_VERSION }
+    : { prompt, model_version: MODEL_VERSION };
   const tier = parseInt(String(body.polycount ?? ""), 10); // "20k (Mobile)", "50k (Console)", "120k (Cinematic)"
   payload.face_limit = tier === 120 ? 120000 : tier === 50 ? 50000 : tier === 20 ? 20000 : 18000;
   if (body.topology === "quad") payload.quad = true;
@@ -276,7 +281,8 @@ Deno.serve(async (req) => {
   }
 
   // 2) Start the Tripo job.
-  const r = await fetch(TRIPO, { method: "POST", headers: tripoHeaders, body: JSON.stringify(payload) });
+  const startUrl = `${TRIPO}/generation/${file ? "image-to-model" : "text-to-model"}`;
+  const r = await fetch(startUrl, { method: "POST", headers: tripoHeaders, body: JSON.stringify(payload) });
   const j = await r.json().catch(() => ({}));
   const taskId: string | undefined = j?.data?.task_id;
   if (!r.ok || j?.code || !taskId) {
