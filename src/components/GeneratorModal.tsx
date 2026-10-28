@@ -833,7 +833,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     // tend to draw legs), out-of-frame clothing/traits are removed above, and the framing is placed first in the prompt.
     const framingDesc =
       framing === 'close up portrait'
-        ? 'tight close-up headshot portrait, face and headpiece fill the whole frame, shoulders cropped at the neckline, shallow depth of field, intimate focus on facial expression and eyes'
+        ? 'bust portrait, head and shoulders only, chest-up, face and headpiece fill the frame, cropped at the collarbone, shallow depth of field, intimate focus on facial expression and eyes'
         : framing === 'half body'
         ? 'medium waist-up portrait, framed at the belt line, upper body and arms, prominent armor and garment details'
         : framing === 'epic'
