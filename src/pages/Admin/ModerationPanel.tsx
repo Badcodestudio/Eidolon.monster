@@ -62,6 +62,7 @@ export default function ModerationPanel() {
   const [users, setUsers] = useState<Account[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
   const [userFilter, setUserFilter] = useState('');
+  const [planNames, setPlanNames] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -84,6 +85,13 @@ export default function ModerationPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Plan buttons come from the real plans table, so the names always match what the server accepts.
+  useEffect(() => {
+    invokeFunction<{ plans: { name: string }[] }>('admin', { action: 'list_plans' })
+      .then((r) => setPlanNames(r.plans.map((p) => p.name)))
+      .catch(() => setPlanNames([]));
+  }, []);
 
   const act = async (body: Record<string, unknown>, refreshFound?: string) => {
     setMsg('');
@@ -214,7 +222,8 @@ export default function ModerationPanel() {
             <AccountRow a={found} />
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-gray-300">
               <span>Plan:</span>
-              {['Free', 'Apprentice', 'Archetype Pro', 'Studio Guild'].map((p) => (
+              {planNames.length === 0 && <span className="text-amber-300">No plans found. Check Plans &amp; limits.</span>}
+              {planNames.map((p) => (
                 <button
                   key={p}
                   className={`${btn} ${found.plan === p ? 'border-emerald-500 text-emerald-300' : 'border-white/15 text-gray-300'}`}
