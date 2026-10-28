@@ -44,7 +44,7 @@ const GORE_PATTERNS: RegExp[] = [
 // Starter list: add more names in Admin notes and here as you see them.
 const REAL_PERSON_PATTERNS: RegExp[] = [
   /\b(deepfake|celebrity|celebrities|real person|real people|likeness of|lookalike of|photo of a real)\b/i,
-  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[e\u00e9]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
+  /\b(donald trump|joe biden|kamala harris|barack obama|vladimir putin|elon musk|taylor swift|kim kardashian|beyonc[eé]|kanye west|emma watson|scarlett johansson|keanu reeves|tom cruise|zendaya|ariana grande|selena gomez)\b/i,
 ];
 
 // Harmless phrases that contain trigger words (colours, young animals, idioms).
@@ -220,9 +220,13 @@ Deno.serve(async (req) => {
   let file: { type: string; url: string } | undefined;
   if (mode === "image") {
     if (!/^https:\/\//i.test(imageUrl)) return json({ error: "Please choose an image you made in Eidolon." }, 400);
+    // Own picture = a recorded generation of this user, OR a file sitting in this user's own folder of our storage
+    // (only the server ever writes there, after moderation), so a missed history row can't block a real picture.
     const { data: own } = await admin.from("generations").select("id")
       .eq("user_id", user.id).eq("kind", "image").eq("blocked", false).eq("result_url", imageUrl).limit(1);
-    if (!own || own.length === 0) {
+    const ownFolder = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/creations/${user.id}/`;
+    const inOwnFolder = imageUrl.startsWith(ownFolder) && !imageUrl.includes("..");
+    if ((!own || own.length === 0) && !inOwnFolder) {
       return json({ error: "For 3D, use an image you generated in Eidolon (open it from your History, or generate a new one)." }, 400);
     }
     const ext = new URL(imageUrl).pathname.toLowerCase().split(".").pop();
