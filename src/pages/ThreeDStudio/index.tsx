@@ -9,7 +9,6 @@ import { loadUsage, notifyUsageChanged } from '@/lib/usage';
 import {
   Box,
   Sparkles,
-  Layers,
   Download,
   RotateCw,
   Eye,
@@ -39,6 +38,33 @@ export default function ThreeDStudioPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [tripoStatus, setTripoStatus] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+
+  // The signed-in person's own finished 3D models (kept in the studio's storage).
+  type MyModel = { id: string; created_at: string; prompt: string | null; result_url: string; preview_url: string | null };
+  const [myModels, setMyModels] = useState<MyModel[]>([]);
+  const [spinId, setSpinId] = useState<string | null>(null); // which saved model is spinning as a turntable
+  const [myModelsState, setMyModelsState] = useState<'loading' | 'signedout' | 'ready'>('loading');
+  const loadMyModels = async () => {
+    const { data: sess } = await supabase.auth.getSession();
+    if (!sess.session) {
+      setMyModels([]);
+      setMyModelsState('signedout');
+      return;
+    }
+    const { data } = await supabase
+      .from('generations')
+      .select('id,created_at,prompt,result_url,preview_url')
+      .eq('kind', '3d')
+      .eq('status', 'done')
+      .not('result_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(24);
+    setMyModels((data ?? []) as MyModel[]);
+    setMyModelsState('ready');
+  };
+  useEffect(() => {
+    void loadMyModels();
+  }, []);
 
   const [generatedModel, setGeneratedModel] = useState<{
     title: string;
@@ -133,6 +159,7 @@ export default function ThreeDStudioPage() {
             previewUrl: check.preview_url || imageUrl,
             modelUrl: check.model_url || undefined,
           });
+          void loadMyModels();
           return;
         }
         if (check.status === 'failed') {
@@ -150,29 +177,6 @@ export default function ThreeDStudioPage() {
     }
   };
 
-  const sample3DModels = [
-    {
-      id: 'model-1',
-      title: 'Colossal Wyrm Dragon Skull',
-      format: 'GLB / FBX',
-      triangles: '64k',
-      img: 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935238399_0.png?imageMogr2/format/webp',
-    },
-    {
-      id: 'model-2',
-      title: 'Celestial Astral Portal Ring',
-      format: 'GLB / OBJ',
-      triangles: '52k',
-      img: 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935325074_0.png?imageMogr2/format/webp',
-    },
-    {
-      id: 'model-3',
-      title: 'Titan Sovereign Obsidian Bastion',
-      format: 'GLB / USDZ',
-      triangles: '78k',
-      img: 'https://cdn.wegic.ai/assets/onepage/agent/images/1792935413853_0.png?imageMogr2/format/webp',
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-[#08090C] text-[#E6E8EC]">
@@ -552,63 +556,118 @@ export default function ThreeDStudioPage() {
           </div>
         </div>
 
-        {/* Pre-Generated 3D Library */}
+        {/* Your 3D models */}
         <div className="space-y-6">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div>
-              <h2 className="text-xl font-bold text-white font-sans">
-                Curated 3D Mesh Library
-              </h2>
+              <h2 className="text-xl font-bold text-white font-sans">Your 3D Models</h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Inspect and download pre-compiled creature and architectural meshes.
+                Everything you've built here is kept. Open one in the viewer or download the .GLB file.
               </p>
             </div>
-            <span className="text-xs font-mono text-blue-400">PBR Textured &bull; Rig-Ready</span>
+            <span className="text-xs font-mono text-blue-400">{myModels.length} saved</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {sample3DModels.map((item) => (
-              <div
-                key={item.id}
-                className="bg-[#0E1015] border border-white/10 rounded-2xl overflow-hidden hover:border-blue-400/40 transition group"
-              >
-                <div className="relative aspect-video overflow-hidden bg-black/60">
-                  <img
-                    src={item.img}
-                    alt={item.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md text-[10px] font-mono text-blue-300 border border-blue-500/30">
-                    {item.triangles} Tris
-                  </div>
-                </div>
-
-                <div className="p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-xs font-bold text-white truncate">{item.title}</h4>
-                    <span className="text-[10px] font-mono text-gray-400">{item.format}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrompt(`3D Asset: ${item.title}`);
-                      setGeneratedModel({
-                        title: item.title,
-                        format: item.format,
-                        polycount: `${item.triangles} Triangles`,
-                        textureMap: '4K PBR Textures',
-                        previewUrl: item.img,
-                      });
-                    }}
-                    className="p-2 rounded-lg bg-white/5 hover:bg-blue-500/20 text-gray-300 hover:text-blue-300 transition"
-                    title="Load in 3D Viewport"
+          {myModelsState === 'loading' ? (
+            <p className="text-xs font-mono text-gray-400">Loading your models...</p>
+          ) : myModelsState === 'signedout' ? (
+            <p className="text-sm text-gray-400">Sign in to see the 3D models you've made.</p>
+          ) : myModels.length === 0 ? (
+            <p className="text-sm text-gray-400">No 3D models yet. Build your first one above and it will show up here.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
+              {myModels.map((m) => {
+                const title = (m.prompt ?? '').trim().slice(0, 40) || '3D model';
+                const preview = m.preview_url || imageUrl;
+                return (
+                  <div
+                    key={m.id}
+                    className="bg-[#0E1015] border border-white/10 rounded-2xl overflow-hidden hover:border-blue-400/40 transition group"
                   >
-                    <Layers className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    <div className="relative aspect-video overflow-hidden bg-black/60">
+                      {spinId === m.id ? (
+                        <Suspense
+                          fallback={
+                            <div className="w-full h-full flex items-center justify-center text-[10px] font-mono text-blue-300">
+                              Loading turntable...
+                            </div>
+                          }
+                        >
+                          <ModelViewer
+                            url={m.result_url}
+                            fallback={
+                              m.preview_url ? (
+                                <img src={m.preview_url} alt={title} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full" />
+                              )
+                            }
+                          />
+                        </Suspense>
+                      ) : m.preview_url ? (
+                        <img
+                          src={m.preview_url}
+                          alt={title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-blue-300">
+                          <Box className="w-8 h-8" />
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/80 text-[10px] font-mono text-blue-300 border border-blue-500/30">
+                        GLB
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-white truncate">{title}</h4>
+                        <span className="text-[10px] font-mono text-gray-400">
+                          {new Date(m.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSpinId(spinId === m.id ? null : m.id)}
+                          className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-blue-500/20 text-gray-200 hover:text-blue-300 text-[11px] font-semibold transition flex items-center justify-center gap-1"
+                        >
+                          <RotateCw className="w-3.5 h-3.5" />
+                          <span>{spinId === m.id ? 'Stop' : 'Spin'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGeneratedModel({
+                              title,
+                              format: 'GLB',
+                              polycount: 'Saved model',
+                              textureMap: 'PBR textures',
+                              previewUrl: preview,
+                              modelUrl: m.result_url,
+                            });
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-blue-500/20 text-gray-200 hover:text-blue-300 text-[11px] font-semibold transition flex items-center justify-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>View</span>
+                        </button>
+                        <a
+                          href={m.result_url}
+                          download="model.glb"
+                          className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-200 text-[11px] font-semibold transition flex items-center justify-center gap-1"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>.GLB</span>
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </main>
 
