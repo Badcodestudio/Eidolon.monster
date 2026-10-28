@@ -13,6 +13,7 @@ interface Account {
   is_owner?: boolean;
   created_at?: string;
   last_sign_in_at?: string | null;
+  email_confirmed_at?: string | null;
 }
 
 interface BlockedItem {
@@ -107,6 +108,23 @@ export default function ModerationPanel() {
     }
   };
 
+  // Makes a one-time password reset link you can send to the person yourself (works even if email sending is broken).
+  const makeResetLink = async (userId: string) => {
+    setMsg('');
+    try {
+      const r = await invokeFunction<{ link: string | null }>('admin', { action: 'reset_link', user_id: userId });
+      if (!r.link) throw new Error('No link was made.');
+      try {
+        await navigator.clipboard.writeText(r.link);
+        setMsg('Reset link copied. Send it to the person; it works once.');
+      } catch {
+        setMsg(`Reset link: ${r.link}`);
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not make the link.');
+    }
+  };
+
   const lookup = async (email: string) => {
     try {
       const r = await invokeFunction<{ account: Account }>('admin', { action: 'find_user', email });
@@ -169,7 +187,7 @@ export default function ModerationPanel() {
           Refresh
         </button>
       </div>
-      {msg && <div className="text-xs font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5">{msg}</div>}
+      {msg && <div className="text-xs font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 break-all">{msg}</div>}
 
       <div className={card}>
         <p className="text-xs font-semibold text-white">Find an account</p>
@@ -210,6 +228,41 @@ export default function ModerationPanel() {
               <button className={`${btn} border-white/15`} onClick={() => act({ action: 'add_bonus', user_id: found.id, amount: 5 }, found.email)}>+5</button>
               <button className={`${btn} border-white/15`} onClick={() => act({ action: 'add_bonus', user_id: found.id, amount: -1 }, found.email)}>-1</button>
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-gray-300">
+              <span>Email: {found.email_confirmed_at ? 'confirmed' : 'NOT confirmed'}</span>
+              {!found.email_confirmed_at && (
+                <button
+                  className={`${btn} border-emerald-500/40 text-emerald-300`}
+                  onClick={() => act({ action: 'confirm_email', user_id: found.id }, found.email)}
+                >
+                  Confirm email
+                </button>
+              )}
+              <button
+                className={`${btn} border-white/15`}
+                onClick={() => {
+                  const next = window.prompt('New email address for this account:', found.email ?? '');
+                  if (next && next.trim()) void act({ action: 'set_email', user_id: found.id, email: next.trim() }, next.trim());
+                }}
+              >
+                Change email
+              </button>
+              <button className={`${btn} border-white/15`} onClick={() => void makeResetLink(found.id)}>
+                Password reset link
+              </button>
+              {!found.is_owner && (
+                <button
+                  className={`${btn} border-red-500/40 text-red-300 hover:bg-red-500/10`}
+                  onClick={() => {
+                    if (window.confirm(`Permanently delete ${found.email ?? found.id}? This cannot be undone.`)) {
+                      void act({ action: 'delete_user', user_id: found.id }).then(() => setFound(null));
+                    }
+                  }}
+                >
+                  Delete account
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -242,6 +295,7 @@ export default function ModerationPanel() {
                 {u.plan ?? 'Free'} &bull; strikes {u.strikes ?? 0}
                 {u.locked ? ' • LOCKED' : ''}
                 {u.is_owner ? ' • owner' : ''}
+                {u.email_confirmed_at ? '' : ' • unconfirmed'}
                 {u.created_at ? ` • joined ${new Date(u.created_at).toLocaleDateString()}` : ''}
               </div>
             </div>
