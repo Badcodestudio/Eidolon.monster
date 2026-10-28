@@ -635,6 +635,55 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     return localStorage.getItem('eidolon_gen_result') || null;
   });
 
+  // Image models ignore crop instructions, so Close Up / Half Body results are cropped after generation.
+  // resultCrop = share of the image width kept (a square window anchored at the top centre), or null for no crop.
+  const [resultCrop, setResultCrop] = useState<number | null>(() => {
+    const v = parseFloat(localStorage.getItem('eidolon_gen_result_crop') || '');
+    return v > 0 && v < 1 ? v : null;
+  });
+  const [naturalAspect, setNaturalAspect] = useState(1); // width / height of the generated image
+  useEffect(() => {
+    try {
+      if (resultCrop) localStorage.setItem('eidolon_gen_result_crop', String(resultCrop));
+      else localStorage.removeItem('eidolon_gen_result_crop');
+    } catch {
+      // storage unavailable
+    }
+  }, [resultCrop]);
+  // Effective crop: never taller than the image itself (landscape images are cropped less).
+  const effCrop = resultCrop ? Math.min(resultCrop, 1 / naturalAspect) : null;
+
+  // Download the result, cropped the same way as the preview when a crop is active.
+  const handleDownload = async (e: React.MouseEvent) => {
+    if (!generatedResult || !effCrop) return; // normal link download
+    e.preventDefault();
+    try {
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('load'));
+        img.src = generatedResult;
+      });
+      const side = Math.round(img.naturalWidth * effCrop);
+      const sx = Math.round((img.naturalWidth - side) / 2);
+      const canvas = document.createElement('canvas');
+      canvas.width = side;
+      canvas.height = side;
+      canvas.getContext('2d')!.drawImage(img, sx, 0, side, side, 0, 0, side, side);
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('blob');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'eidolon-character.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      window.open(generatedResult, '_blank');
+    }
+  };
+
   // Save changes to localStorage so navigating away never loses progress
   useEffect(() => {
     localStorage.setItem('eidolon_gen_style', selectedStyle);
@@ -842,9 +891,10 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
     // Image models drift toward full-body shots, so each framing is described positively (negatives like "no legs"
     // tend to draw legs), out-of-frame clothing/traits are removed above, and the framing is placed first in the prompt.
+    // The finished image is also cropped after generation (see resultCrop), so the prompt only has to get close.
     const framingDesc =
       framing === 'close up portrait'
-        ? 'bust portrait, head and shoulders only, chest-up, face and headpiece fill the frame, cropped at the collarbone, shallow depth of field, intimate focus on facial expression and eyes'
+        ? 'bust portrait, head and shoulders, chest-up, natural proportions, cropped at the collarbone, expressive face and eyes'
         : framing === 'half body'
         ? 'medium waist-up portrait, framed at the belt line, upper body and arms, prominent armor and garment details'
         : framing === 'epic'
@@ -961,6 +1011,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     setIsGenerating(true);
     setErrorMessage(null);
     setGeneratedResult(null);
+    setResultCrop(null);
     setIsSavedToGallery(false);
 
     // Use the prompt directly as visible on screen (which is assembled dynamically from all clicks and user edits)
@@ -1024,6 +1075,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
       setProgress(100);
       setGeneratedResult(generatedUrl);
+      setResultCrop(selectedFraming === 'close up portrait' ? 0.55 : selectedFraming === 'half body' ? 0.72 : null);
 
       const generatedTitle =
         archetypeMode === 'Cosplay'
@@ -1889,11 +1941,23 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
               </div>
             ) : generatedResult ? (
               <div className="w-full h-full flex flex-col items-center justify-center space-y-4 animate-fade-in">
-                <div className="relative rounded-xl overflow-hidden border border-white/20 shadow-2xl max-h-[420px] w-full">
+                <div
+                  className={`relative rounded-xl overflow-hidden border border-white/20 shadow-2xl w-full ${effCrop ? '' : 'max-h-[420px]'}`}
+                  style={effCrop ? { aspectRatio: '1 / 1' } : undefined}
+                >
                   <img
                     src={generatedResult}
                     alt="Generated Character"
-                    className="w-full h-full object-cover"
+                    onLoad={(e) => {
+                      const el = e.currentTarget;
+                      if (el.naturalWidth && el.naturalHeight) setNaturalAspect(el.naturalWidth / el.naturalHeight);
+                    }}
+                    className={effCrop ? 'absolute max-w-none' : 'w-full h-full object-cover'}
+                    style={
+                      effCrop
+                        ? { width: `${100 / effCrop}%`, left: `${-((100 / effCrop - 100) / 2)}%`, top: 0 }
+                        : undefined
+                    }
                   />
                   <div className="absolute bottom-2 left-2 right-2 bg-black/75 backdrop-blur-md p-2.5 rounded-lg text-[11px] text-gray-300 space-y-0.5">
                     <div className="flex items-center justify-between">
@@ -1942,6 +2006,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                     <a
                       href={generatedResult}
                       download="eidolon-character.png"
+                      onClick={handleDownload}
                       target="_blank"
                       rel="noreferrer"
                       className="py-2.5 px-3 text-center text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-white transition flex items-center justify-center gap-1"
@@ -1955,6 +2020,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                       type="button"
                       onClick={() => {
                         setIsSavedToGallery(false);
+                        setResultCrop(null);
                         const next = ARTWORK_GALLERY[Math.floor(Math.random() * ARTWORK_GALLERY.length)];
                         setGeneratedResult(next.imageUrl);
                       }}
