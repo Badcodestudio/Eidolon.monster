@@ -120,11 +120,11 @@ Deno.serve(async (req) => {
   // Browse accounts (newest first). Optional text filter on the email. Returns up to 100 with their profile data.
   if (action === "list_users") {
     const q = String(body.q ?? "").trim().toLowerCase();
-    const all: { id: string; email: string; created_at: string; last_sign_in_at: string | null }[] = [];
+    const all: { id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null }[] = [];
     for (let page = 1; page <= 10; page++) {
       const { data } = await admin.auth.admin.listUsers({ page, perPage: 200 });
       for (const x of data?.users ?? []) {
-        all.push({ id: x.id, email: x.email ?? x.id, created_at: x.created_at, last_sign_in_at: x.last_sign_in_at ?? null });
+        all.push({ id: x.id, email: x.email ?? x.id, created_at: x.created_at, last_sign_in_at: x.last_sign_in_at ?? null, email_confirmed_at: x.email_confirmed_at ?? null });
       }
       if (!data?.users || data.users.length < 200) break;
     }
@@ -143,12 +143,43 @@ Deno.serve(async (req) => {
     const id = await findUserId(String(body.email ?? ""));
     if (!id) return json({ error: "No account with that email." }, 404);
     const { data: p } = await admin.from("profiles").select("*").eq("id", id).maybeSingle();
-    return json({ account: { ...(p ?? { id }), email: String(body.email).trim() } });
+    const { data: au } = await admin.auth.admin.getUserById(id);
+    return json({ account: { ...(p ?? { id }), email: String(body.email).trim(), email_confirmed_at: au?.user?.email_confirmed_at ?? null } });
   }
 
   // Everything below changes an account.
   const userId = String(body.user_id ?? "");
   if (!userId) return json({ error: "Missing user." }, 400);
+
+  // Account fixes for when email sending is broken or a person is stuck.
+  if (action === "confirm_email") {
+    const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+  if (action === "set_email") {
+    const email = String(body.email ?? "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "That does not look like an email address." }, 400);
+    const { error } = await admin.auth.admin.updateUserById(userId, { email, email_confirm: true });
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+  if (action === "reset_link") {
+    const { data: au } = await admin.auth.admin.getUserById(userId);
+    const email = au?.user?.email;
+    if (!email) return json({ error: "No email on that account." }, 400);
+    const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: "https://eidolon.monster/" } });
+    if (error) return json({ error: error.message }, 400);
+    return json({ link: data?.properties?.action_link ?? null });
+  }
+  if (action === "delete_user") {
+    if (userId === u.user.id) return json({ error: "You cannot delete your own account here." }, 400);
+    const { data: target } = await admin.from("profiles").select("is_owner").eq("id", userId).maybeSingle();
+    if (target?.is_owner) return json({ error: "The owner account cannot be deleted." }, 400);
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
 
   if (action === "unlock") {
     await admin.from("profiles").update({ locked: false, strikes: 0, lock_reason: null }).eq("id", userId);
