@@ -2,24 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
-  LayoutDashboard,
   Image,
   Box,
   Compass,
   History,
-  FolderHeart,
   Film,
-  Bookmark,
   CreditCard,
   Lightbulb,
   BarChart3,
   HelpCircle,
   FileCheck,
-  Settings,
   ShieldAlert,
-  Sun,
-  Moon,
-  Laptop,
   X,
   ChevronRight,
   User,
@@ -39,7 +32,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onOpenCreate,
 }) => {
   const navigate = useNavigate();
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('dark');
   const [activeItem, setActiveItem] = useState<string>('create');
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -66,15 +58,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
         } else {
           navigate('/create');
         }
-      },
-    },
-    {
-      id: 'dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      action: () => {
-        onClose();
-        navigate('/');
       },
     },
     {
@@ -116,30 +99,12 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       },
     },
     {
-      id: 'references',
-      label: 'References',
-      icon: FolderHeart,
-      action: () => {
-        onClose();
-        if (onOpenCreate) onOpenCreate();
-      },
-    },
-    {
       id: 'clip-gallery',
       label: 'Clip Gallery',
       icon: Film,
       action: () => {
         onClose();
         navigate('/#gallery');
-      },
-    },
-    {
-      id: 'presets',
-      label: 'Presets',
-      icon: Bookmark,
-      action: () => {
-        onClose();
-        if (onOpenCreate) onOpenCreate();
       },
     },
     {
@@ -195,15 +160,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       action: () => {
         onClose();
         navigate('/legal');
-      },
-    },
-    {
-      id: 'settings',
-      label: 'Settings',
-      icon: Settings,
-      action: () => {
-        onClose();
-        if (onOpenCreate) onOpenCreate();
       },
     },
     {
@@ -299,48 +255,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           })}
         </div>
 
-        {/* Bottom Theme & Account Footer */}
+        {/* Bottom Account Footer */}
         <div className="p-4 border-t border-white/10 space-y-3 bg-[#0B0D13]">
-          {/* Theme Segment Control */}
-          <div className="grid grid-cols-3 gap-1 p-1 bg-[#181B26] border border-white/5 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setThemeMode('light')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
-                themeMode === 'light'
-                  ? 'bg-[#F7E7CE] text-[#3A2208] font-bold shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Sun className="w-3.5 h-3.5" />
-              <span>Light</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setThemeMode('dark')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
-                themeMode === 'dark'
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Moon className="w-3.5 h-3.5" />
-              <span>Dark</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setThemeMode('system')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
-                themeMode === 'system'
-                  ? 'bg-white/10 text-white font-semibold shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Laptop className="w-3.5 h-3.5" />
-              <span>System</span>
-            </button>
-          </div>
-
           {/* Account Profile Trigger */}
           {currentUser ? (
             <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#161922] border border-white/10">
