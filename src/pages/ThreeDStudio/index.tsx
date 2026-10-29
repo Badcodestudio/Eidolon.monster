@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
@@ -42,7 +42,7 @@ export default function ThreeDStudioPage() {
   // The signed-in person's own finished 3D models (kept in the studio's storage).
   type MyModel = { id: string; created_at: string; prompt: string | null; result_url: string; preview_url: string | null };
   const [myModels, setMyModels] = useState<MyModel[]>([]);
-  const [spinId, setSpinId] = useState<string | null>(null); // which saved model is spinning as a turntable
+  const [spinId] = useState<string | null>(null); // which saved model is spinning as a turntable
   const [myModelsState, setMyModelsState] = useState<'loading' | 'signedout' | 'ready'>('loading');
   const loadMyModels = async () => {
     const { data: sess } = await supabase.auth.getSession();
@@ -213,7 +213,7 @@ export default function ThreeDStudioPage() {
                 Tripo3D Mesh Pipeline
               </h2>
               <span className="text-[10px] font-mono text-blue-400 font-semibold bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                Tripo3D
+                Tripo3D v2.0
               </span>
             </div>
 
@@ -627,14 +627,13 @@ export default function ThreeDStudioPage() {
                         </span>
                       </div>
                       <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSpinId(spinId === m.id ? null : m.id)}
-                          className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-blue-500/20 text-gray-200 hover:text-blue-300 text-[11px] font-semibold transition flex items-center justify-center gap-1"
+                        <Link
+                          to={`/3d-view/${m.id}`}
+                          className="flex-1 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 text-[11px] font-semibold transition flex items-center justify-center gap-1"
                         >
                           <RotateCw className="w-3.5 h-3.5" />
-                          <span>{spinId === m.id ? 'Stop' : 'Spin'}</span>
-                        </button>
+                          <span>Turntable</span>
+                        </Link>
                         <button
                           type="button"
                           onClick={() => {
