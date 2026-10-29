@@ -26,6 +26,7 @@ import {
 import { ARTWORK_GALLERY } from '@/data/artworks';
 import { saveArtworkToCommunity, getAllGalleryArtworks } from '@/lib/communityGallery';
 import { saveToGenerationHistory } from '@/lib/generationHistory';
+import { EXTRA_MALE_ENTITIES, MALE_CLOTHING_PRESETS, MALE_LOOKS } from '@/data/genderOptions';
 
 interface GeneratorModalProps {
   isOpen: boolean;
@@ -570,6 +571,9 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     return localStorage.getItem('eidolon_gen_gender') || 'Female';
   });
 
+  // Male build / look chips (used when Male or Any is selected)
+  const [selectedLooks, setSelectedLooks] = useState<string[]>([]);
+
   // Step 2: Hybrid or Cosplay
   const [archetypeMode, setArchetypeMode] = useState<ArchetypeMode>(() => {
     return (localStorage.getItem('eidolon_gen_archetype') as ArchetypeMode) || 'Cosplay';
@@ -819,7 +823,27 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     setSelectedEntityName(target.entities[0].name);
   };
 
-  const selectedEntity = currentPantheon.entities.find((e) => e.name === selectedEntityName) || currentPantheon.entities[0];
+  // Characters for the chosen gender: Male = gods + creations (plus extra male characters), Female = goddesses + creations, Any = all.
+  const allEntities: PantheonEntity[] = [...currentPantheon.entities, ...(EXTRA_MALE_ENTITIES[currentPantheon.name] ?? [])];
+  const visibleEntities = allEntities.filter((e) =>
+    selectedGender === 'Male' ? e.type !== 'Goddess' : selectedGender === 'Female' ? e.type !== 'God' : true
+  );
+  const entityChoices = visibleEntities.length > 0 ? visibleEntities : allEntities;
+  const visibleClothing: string[] =
+    selectedGender === 'Male'
+      ? MALE_CLOTHING_PRESETS
+      : selectedGender === 'Any'
+      ? Array.from(new Set([...MALE_CLOTHING_PRESETS.filter((c) => c !== 'Custom Attire'), ...CLOTHING_PRESETS]))
+      : [...CLOTHING_PRESETS];
+
+  const selectedEntity = entityChoices.find((e) => e.name === selectedEntityName) || entityChoices[0];
+
+  // Switching gender can leave a character or outfit that is no longer offered: move to the first valid one.
+  useEffect(() => {
+    if (!entityChoices.some((e) => e.name === selectedEntityName)) setSelectedEntityName(entityChoices[0].name);
+    if (!visibleClothing.includes(selectedClothing)) setSelectedClothing(visibleClothing[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGender, selectedPantheonName]);
 
   // Function to compile prompt based on current selections
   const compilePromptFromSelections = (
@@ -850,6 +874,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       closeUp || halfBody
         ? gender === 'Female' ? 'woman' : gender === 'Male' ? 'man' : 'character'
         : gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
+    const looksDesc = gender !== 'Female' && selectedLooks.length > 0 ? selectedLooks.join(', ') : '';
     const visibleTraits = traits.filter((t) =>
       closeUp ? !['legs', 'tail', 'arms'].includes(t) : halfBody ? !['legs'].includes(t) : true
     );
@@ -933,6 +958,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       framingDesc,
       `${style} art style`,
       genderTerm,
+      looksDesc,
       archetypeDesc,
       companionDesc,
       `Attire: ${effectiveClothing}`,
@@ -993,6 +1019,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     selectedQuality,
     referenceImageUrl,
     referenceName,
+    selectedLooks,
   ]);
 
   if (!isOpen) return null;
@@ -1229,6 +1256,37 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                 </div>
               </div>
 
+              {/* Male build / look chips */}
+              {selectedGender !== 'Female' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs uppercase tracking-wider text-emerald-400 font-bold flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    Build & Look
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {MALE_LOOKS.map((look) => {
+                      const on = selectedLooks.includes(look);
+                      return (
+                        <button
+                          key={look}
+                          type="button"
+                          onClick={() =>
+                            setSelectedLooks((prev) => (on ? prev.filter((l) => l !== look) : [...prev, look]))
+                          }
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition ${
+                            on
+                              ? 'bg-white text-black shadow-sm'
+                              : 'bg-[#141720] text-gray-400 border border-white/5 hover:text-white'
+                          }`}
+                        >
+                          {look}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* ROW 2: Archetype Mode Toggle */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -1322,7 +1380,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                         onChange={(e) => setSelectedEntityName(e.target.value)}
                         className="w-full appearance-none bg-[#171B24] border border-white/10 hover:border-white/20 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-medium focus:outline-none cursor-pointer pr-9 transition"
                       >
-                        {currentPantheon.entities.map((entity) => (
+                        {entityChoices.map((entity) => (
                           <option key={entity.name} value={entity.name} className="bg-[#0D0F14] text-white">
                             [{entity.type}] {entity.name} — {entity.title}
                           </option>
@@ -1498,7 +1556,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                     }}
                     className="w-full appearance-none bg-[#141720] border border-white/10 hover:border-white/20 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-medium focus:outline-none cursor-pointer pr-9 transition"
                   >
-                    {CLOTHING_PRESETS.map((attire) => (
+                    {visibleClothing.map((attire) => (
                       <option key={attire} value={attire} className="bg-[#0D0F14] text-white">
                         {attire}
                       </option>
