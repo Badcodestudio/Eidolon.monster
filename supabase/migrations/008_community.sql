@@ -6,7 +6,7 @@ alter table public.generations add column if not exists removed_by_admin boolean
 create index if not exists generations_shared_idx on public.generations (shared_at desc) where shared = true;
 
 create table if not exists public.community_likes (
-  generation_id uuid not null references public.generations(id) on delete cascade,
+  generation_id bigint not null references public.generations(id) on delete cascade,
   user_id uuid not null,
   created_at timestamptz not null default now(),
   primary key (generation_id, user_id)
