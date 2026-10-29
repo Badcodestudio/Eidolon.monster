@@ -5,6 +5,7 @@ import { Footer } from '@/components/Footer';
 import { GeneratorModal } from '@/components/GeneratorModal';
 import { ARTWORK_GALLERY, Artwork } from '@/data/artworks';
 import { getCommunityArtworks } from '@/lib/communityGallery';
+import { invokeFunction } from '@/lib/api';
 import {
   Sparkles,
   Heart,
@@ -13,6 +14,8 @@ import {
   Filter,
   Box,
   History,
+  Share2,
+  Trash2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -23,6 +26,9 @@ export default function GalleryPage() {
 
   const [activeFilter, setActiveFilter] = useState<string>(initialTab);
   const [communityArtworks, setCommunityArtworks] = useState<Artwork[]>([]);
+  const [sharedArtworks, setSharedArtworks] = useState<Artwork[]>([]);
+  const [isOwner, setIsOwner] = useState(false);
+  const [notice, setNotice] = useState('');
   const [likesMap, setLikesMap] = useState<Record<string, number>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [displayedCount, setDisplayedCount] = useState<number>(15);
@@ -55,6 +61,63 @@ export default function GalleryPage() {
     };
   }, []);
 
+  // Real community pieces: shared by signed-in people, already past our prompt check and fal's check.
+  const loadShared = async () => {
+    try {
+      const res = await invokeFunction<{
+        is_owner: boolean;
+        items: { id: string; title: string; prompt: string; image_url: string; likes: number }[];
+      }>('community', { action: 'list' });
+      setIsOwner(!!res.is_owner);
+      setSharedArtworks(
+        (res.items ?? []).map((i) => ({
+          id: `shared-${i.id}`,
+          title: i.title,
+          category: 'fantasy' as const,
+          imageUrl: i.image_url,
+          prompt: i.prompt,
+          aspectRatio: 'aspect-[4/5]',
+          author: '',
+          likes: i.likes,
+        }))
+      );
+    } catch {
+      // Community list unavailable: the featured pieces still show.
+    }
+  };
+  useEffect(() => {
+    void loadShared();
+  }, []);
+
+  const flash = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(''), 3500);
+  };
+
+  const handleShare = async (art: Artwork, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Share this image and its prompt in the public Community tab?')) return;
+    try {
+      await invokeFunction('community', { action: 'share', original_url: art.imageUrl, title: art.title });
+      flash('Shared to Community.');
+      void loadShared();
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Could not share right now.');
+    }
+  };
+
+  const handleRemove = async (art: Artwork, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Remove this piece from Community? It can not be shared again.')) return;
+    try {
+      await invokeFunction('community', { action: 'remove', id: art.id.replace('shared-', '') });
+      setSharedArtworks((prev) => prev.filter((a) => a.id !== art.id));
+      flash('Removed.');
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Could not remove.');
+    }
+  };
+
   const handleFilterChange = (filterId: string) => {
     setActiveFilter(filterId);
     if (filterId === 'all') {
@@ -66,6 +129,12 @@ export default function GalleryPage() {
 
   const handleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (id.startsWith('shared-')) {
+      invokeFunction<{ likes: number }>('community', { action: 'like', id: id.replace('shared-', '') })
+        .then((r) => setSharedArtworks((prev) => prev.map((a) => (a.id === id ? { ...a, likes: r.likes } : a))))
+        .catch((err) => flash(err instanceof Error ? err.message : 'Sign in to like.'));
+      return;
+    }
     setLikesMap((prev) => ({
       ...prev,
       [id]: (prev[id] || 0) + 1,
@@ -89,13 +158,13 @@ export default function GalleryPage() {
   const isShowcase = (a: Artwork) => a.id.startsWith('community-epic-');
   const showcaseArtworks = communityArtworks.filter(isShowcase);
   const myArtworks = communityArtworks.filter((a) => !isShowcase(a));
-  const allArtworks = [...communityArtworks, ...ARTWORK_GALLERY];
+  const allArtworks = [...sharedArtworks, ...communityArtworks, ...ARTWORK_GALLERY];
 
   const filteredArtworks =
     activeFilter === 'all'
       ? allArtworks
       : activeFilter === 'community'
-      ? showcaseArtworks
+      ? [...sharedArtworks, ...showcaseArtworks]
       : activeFilter === 'mine'
       ? myArtworks
       : allArtworks.filter((art) => art.category === activeFilter);
@@ -180,6 +249,12 @@ export default function GalleryPage() {
           </div>
         </div>
 
+        {notice && (
+          <div className="mt-4 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs font-mono">
+            {notice}
+          </div>
+        )}
+
         {/* Masonry Artwork Grid */}
         {visibleArtworks.length === 0 ? (
           <div className="text-center py-24 space-y-4">
@@ -212,10 +287,10 @@ export default function GalleryPage() {
                   className={`group relative rounded-2xl overflow-hidden border border-white/10 bg-[#0E1015] cursor-pointer hover:border-emerald-400/50 hover:shadow-2xl hover:shadow-emerald-500/10 transition-all duration-300 ${art.aspectRatio}`}
                 >
                   {/* Badge */}
-                  {art.id.startsWith('community-') && (
+                  {(art.id.startsWith('community-') || art.id.startsWith('shared-')) && (
                     <div className="absolute top-3 left-3 z-10 bg-emerald-500/90 text-black text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-md backdrop-blur-sm flex items-center gap-1">
                       <Sparkles className="w-2.5 h-2.5" />
-                      <span>{isShowcase(art) ? 'Community' : 'Mine'}</span>
+                      <span>{art.id.startsWith('shared-') ? 'Community' : isShowcase(art) ? 'Featured' : 'Mine'}</span>
                     </div>
                   )}
 
@@ -260,6 +335,28 @@ export default function GalleryPage() {
                           <Box className="w-3 h-3 text-blue-200" />
                           <span>Tripo 3D</span>
                         </button>
+
+                        {activeFilter === 'mine' && !isShowcase(art) && (
+                          <button
+                            onClick={(e) => handleShare(art, e)}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-500/80 hover:bg-emerald-500 text-black transition flex items-center gap-1 shadow-sm"
+                            title="Share to Community"
+                          >
+                            <Share2 className="w-3 h-3" />
+                            <span>Share</span>
+                          </button>
+                        )}
+
+                        {isOwner && art.id.startsWith('shared-') && (
+                          <button
+                            onClick={(e) => handleRemove(art, e)}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-red-500/80 hover:bg-red-500 text-white transition flex items-center gap-1 shadow-sm"
+                            title="Remove from Community"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Remove</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={(e) => handleCopyPrompt(art.id, art.prompt, e)}
