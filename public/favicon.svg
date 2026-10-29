@@ -1,6 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="14" fill="#0A0B0E"/>
-  <circle cx="32" cy="32" r="22" stroke="#22C55E" stroke-width="2.5" stroke-dasharray="8 4" opacity="0.6"/>
-  <path d="M22 20h20v6H26v8h12v6H26v8h16v6H22V20z" fill="#FFFFFF"/>
-  <circle cx="44" cy="48" r="4" fill="#22C55E"/>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#12261B"/>
+      <stop offset="1" stop-color="#07080B"/>
+    </radialGradient>
+    <linearGradient id="spirit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4FFF8"/>
+      <stop offset="1" stop-color="#7BE3A4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- horns -->
+  <path d="M22 26C14 24 10 16 12 8c4 6 9 9 15 10z" fill="#22C55E"/>
+  <path d="M42 26c8-2 12-10 10-18-4 6-9 9-15 10z" fill="#22C55E"/>
+  <!-- spirit body: hood with a wavering hem -->
+  <path d="M32 14c-9 0-14 7-14 16v18l4.7-4 4.6 4 4.7-4 4.7 4 4.6-4 4.7 4V30c0-9-5-16-14-16z" fill="url(#spirit)"/>
+  <!-- eyes -->
+  <path d="M23.5 31c3 0 5 1.4 5.6 3.8-3.2.3-5.5-.8-5.6-3.8z" fill="#07140C"/>
+  <path d="M40.5 31c-3 0-5 1.4-5.6 3.8 3.2.3 5.5-.8 5.6-3.8z" fill="#07140C"/>
 </svg>
