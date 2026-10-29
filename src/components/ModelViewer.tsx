@@ -18,7 +18,7 @@ class ViewerBoundary extends Component<{ fallback: ReactNode; children: ReactNod
 }
 
 /** Interactive 3D viewer: drag to rotate, pinch or scroll to zoom. Falls back to the picture if the file can't load. */
-export default function ModelViewer({ url, fallback }: { url: string; fallback: ReactNode }) {
+export default function ModelViewer({ url, fallback, spin = true, speed = 1.2 }: { url: string; fallback: ReactNode; spin?: boolean; speed?: number }) {
   return (
     <ViewerBoundary fallback={fallback}>
       <Canvas camera={{ position: [0, 0.4, 3], fov: 40 }} dpr={[1, 2]} style={{ touchAction: 'none' }}>
@@ -30,7 +30,7 @@ export default function ModelViewer({ url, fallback }: { url: string; fallback: 
             <Model url={url} />
           </Bounds>
         </Suspense>
-        <OrbitControls makeDefault autoRotate autoRotateSpeed={1.2} enableDamping />
+        <OrbitControls makeDefault autoRotate={spin} autoRotateSpeed={speed} enableDamping />
       </Canvas>
     </ViewerBoundary>
   );

@@ -9,6 +9,7 @@ import LegalPage from '@/pages/Legal/index';
 import AdminPage from '@/pages/Admin/index';
 import GalleryPage from '@/pages/Gallery/index';
 import ThreeDStudioPage from '@/pages/ThreeDStudio/index';
+import ModelViewPage from '@/pages/ModelView/index';
 import NotFoundPage from '@/pages/NotFound/index';
 import Layout from '@/components/Layout';
 
@@ -36,6 +37,10 @@ export const router = createBrowserRouter([
       {
         path: '/3d-models',
         element: <ThreeDStudioPage />,
+      },
+      {
+        path: '/3d-view/:id',
+        element: <ModelViewPage />,
       },
       {
         path: '/pricing',
