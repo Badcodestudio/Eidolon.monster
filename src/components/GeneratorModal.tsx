@@ -42,6 +42,8 @@ const ART_STYLES = [
   'Cartoon',
   'Gothic/Alt',
   'Steampunk',
+  'No Style',
+  'Custom Style',
 ] as const;
 
 // 1.5 Gender / Form (After Art Style)
@@ -571,6 +573,9 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     return localStorage.getItem('eidolon_gen_gender') || 'Female';
   });
 
+  // Free-text art style (used when 'Custom Style' is chosen)
+  const [customStyleText, setCustomStyleText] = useState<string>('');
+
   // Male build / look chips (used when Male or Any is selected)
   const [selectedLooks, setSelectedLooks] = useState<string[]>([]);
 
@@ -874,6 +879,8 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
       closeUp || halfBody
         ? gender === 'Female' ? 'woman' : gender === 'Male' ? 'man' : 'character'
         : gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
+    const styleDesc =
+      style === 'No Style' ? '' : style === 'Custom Style' ? customStyleText.trim() : `${style} art style`;
     const looksDesc = gender !== 'Female' && selectedLooks.length > 0 ? selectedLooks.join(', ') : '';
     const visibleTraits = traits.filter((t) =>
       closeUp ? !['legs', 'tail', 'arms'].includes(t) : halfBody ? !['legs'].includes(t) : true
@@ -956,7 +963,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
     const parts = [
       framingDesc,
-      `${style} art style`,
+      styleDesc,
       genderTerm,
       looksDesc,
       archetypeDesc,
@@ -1020,6 +1027,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     referenceImageUrl,
     referenceName,
     selectedLooks,
+    customStyleText,
   ]);
 
   if (!isOpen) return null;
@@ -1229,6 +1237,15 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                     </select>
                     <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
+                  {selectedStyle === 'Custom Style' && (
+                    <input
+                      type="text"
+                      value={customStyleText}
+                      onChange={(e) => setCustomStyleText(e.target.value)}
+                      placeholder="Describe the style (e.g. oil painting, ink wash, 80s dark fantasy cover art)..."
+                      className="w-full bg-[#10131A] border border-emerald-500/40 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-400 transition animate-fade-in"
+                    />
+                  )}
                 </div>
 
                 {/* 1.5 Gender / Form Pills */}
