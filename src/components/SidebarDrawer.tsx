@@ -136,15 +136,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       },
     },
     {
-      id: 'tips',
-      label: 'Tips',
-      icon: Lightbulb,
-      action: () => {
-        onClose();
-        navigate('/docs');
-      },
-    },
-    {
       id: 'help',
       label: 'Help',
       icon: HelpCircle,
