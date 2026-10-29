@@ -84,20 +84,27 @@ export default function GalleryPage() {
     setIsGeneratorOpen(true);
   };
 
-  // Combine static showcase with community submissions
+  // The saved list mixes the built-in showcase pieces (ids start "community-epic-") with the visitor's own
+  // saves, which only live in this browser. Keep them apart so "mine" is never shown as "community".
+  const isShowcase = (a: Artwork) => a.id.startsWith('community-epic-');
+  const showcaseArtworks = communityArtworks.filter(isShowcase);
+  const myArtworks = communityArtworks.filter((a) => !isShowcase(a));
   const allArtworks = [...communityArtworks, ...ARTWORK_GALLERY];
 
   const filteredArtworks =
     activeFilter === 'all'
       ? allArtworks
       : activeFilter === 'community'
-      ? communityArtworks
+      ? showcaseArtworks
+      : activeFilter === 'mine'
+      ? myArtworks
       : allArtworks.filter((art) => art.category === activeFilter);
 
   const visibleArtworks = filteredArtworks.slice(0, displayedCount);
 
   const filters = [
     { id: 'all', label: 'ALL VISIONS' },
+    { id: 'mine', label: 'MY CREATIONS' },
     { id: 'community', label: 'COMMUNITY CREATIONS' },
     { id: 'fae', label: 'FAE & UNSEELIE' },
     { id: 'fantasy', label: 'FANTASY & MYTH' },
@@ -179,7 +186,9 @@ export default function GalleryPage() {
             <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-gray-400">
               <Sparkles className="w-6 h-6 text-emerald-400" />
             </div>
-            <h3 className="text-lg font-bold text-white">No creations found in this gallery view yet</h3>
+            <h3 className="text-lg font-bold text-white">
+              {activeFilter === 'mine' ? 'Nothing saved on this device yet' : 'No creations found in this gallery view yet'}
+            </h3>
             <p className="text-xs text-gray-400 max-w-sm mx-auto">
               Be the first creator to synthesize and publish an artwork to this feed!
             </p>
@@ -206,7 +215,7 @@ export default function GalleryPage() {
                   {art.id.startsWith('community-') && (
                     <div className="absolute top-3 left-3 z-10 bg-emerald-500/90 text-black text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-md backdrop-blur-sm flex items-center gap-1">
                       <Sparkles className="w-2.5 h-2.5" />
-                      <span>Community</span>
+                      <span>{isShowcase(art) ? 'Community' : 'Mine'}</span>
                     </div>
                   )}
 

@@ -67,7 +67,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       badge: 'Local',
       action: () => {
         onClose();
-        navigate('/gallery?tab=community');
+        navigate('/gallery?tab=mine');
       },
     },
     {
@@ -255,7 +255,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           })}
         </div>
 
-        {/* Bottom Account Footer */}
+        {/* Bottom Theme & Account Footer */}
         <div className="p-4 border-t border-white/10 space-y-3 bg-[#0B0D13]">
           {/* Account Profile Trigger */}
           {currentUser ? (
