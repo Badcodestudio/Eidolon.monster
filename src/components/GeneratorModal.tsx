@@ -27,6 +27,7 @@ import { ARTWORK_GALLERY } from '@/data/artworks';
 import { saveArtworkToCommunity, getAllGalleryArtworks } from '@/lib/communityGallery';
 import { saveToGenerationHistory } from '@/lib/generationHistory';
 import { invokeFunction } from '@/lib/api';
+import { scopedKey } from '@/lib/userScope';
 import { EXTRA_MALE_ENTITIES, MALE_CLOTHING_PRESETS, MALE_LOOKS } from '@/data/genderOptions';
 
 interface GeneratorModalProps {
@@ -712,20 +713,20 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
   // Generated Result persistence across navigation
   const [generatedResult, setGeneratedResult] = useState<string | null>(() => {
-    return localStorage.getItem('eidolon_gen_result') || null;
+    return localStorage.getItem(scopedKey('eidolon_gen_result')) || null;
   });
 
   // Image models ignore crop instructions, so Close Up / Half Body results are cropped after generation.
   // resultCrop = share of the image width kept (a square window anchored at the top centre), or null for no crop.
   const [resultCrop, setResultCrop] = useState<number | null>(() => {
-    const v = parseFloat(localStorage.getItem('eidolon_gen_result_crop') || '');
+    const v = parseFloat(localStorage.getItem(scopedKey('eidolon_gen_result_crop')) || '');
     return v > 0 && v < 1 ? v : null;
   });
   const [naturalAspect, setNaturalAspect] = useState(1); // width / height of the generated image
   useEffect(() => {
     try {
-      if (resultCrop) localStorage.setItem('eidolon_gen_result_crop', String(resultCrop));
-      else localStorage.removeItem('eidolon_gen_result_crop');
+      if (resultCrop) localStorage.setItem(scopedKey('eidolon_gen_result_crop'), String(resultCrop));
+      else localStorage.removeItem(scopedKey('eidolon_gen_result_crop'));
     } catch {
       // storage unavailable
     }
@@ -805,7 +806,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
   useEffect(() => {
     if (generatedResult) {
-      localStorage.setItem('eidolon_gen_result', generatedResult);
+      localStorage.setItem(scopedKey('eidolon_gen_result'), generatedResult);
     }
   }, [generatedResult]);
 
