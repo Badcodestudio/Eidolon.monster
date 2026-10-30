@@ -26,6 +26,7 @@ import {
 import { ARTWORK_GALLERY } from '@/data/artworks';
 import { saveArtworkToCommunity, getAllGalleryArtworks } from '@/lib/communityGallery';
 import { saveToGenerationHistory } from '@/lib/generationHistory';
+import { invokeFunction } from '@/lib/api';
 import { EXTRA_MALE_ENTITIES, MALE_CLOTHING_PRESETS, MALE_LOOKS } from '@/data/genderOptions';
 
 interface GeneratorModalProps {
@@ -857,6 +858,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavedToGallery, setIsSavedToGallery] = useState(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -1088,7 +1090,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSaveToCommunity = () => {
+  const handleSaveToCommunity = async () => {
     if (!generatedResult) return;
 
     const title =
@@ -1115,6 +1117,18 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     });
 
     setIsSavedToGallery(true);
+    setShareNote(null);
+
+    // Also publish it to the real public Community tab (the server re-checks it first).
+    try {
+      await invokeFunction('community', { action: 'share', original_url: generatedResult, title });
+      setShareNote('Shared to the public Community tab.');
+    } catch (err) {
+      setIsSavedToGallery(false);
+      setShareNote(
+        `Saved to My Creations, but not shared publicly: ${err instanceof Error ? err.message : 'try again in a moment.'}`
+      );
+    }
   };
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -1125,6 +1139,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     setGeneratedResult(null);
     setResultCrop(null);
     setIsSavedToGallery(false);
+    setShareNote(null);
 
     // Use the prompt directly as visible on screen (which is assembled dynamically from all clicks and user edits)
     const fullPrompt = prompt.trim();
@@ -2160,6 +2175,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                     </p>
                   </div>
                 </div>
+                {shareNote && <p className="w-full text-sm text-emerald-300 leading-snug">{shareNote}</p>}
                 <div className="flex flex-col sm:flex-row gap-2 w-full">
                   <button
                     type="button"
