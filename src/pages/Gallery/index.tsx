@@ -37,6 +37,7 @@ export default function GalleryPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [displayedCount, setDisplayedCount] = useState<number>(15);
 
+  const [viewerArt, setViewerArt] = useState<Artwork | null>(null);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const [activeGeneratorPrompt, setActiveGeneratorPrompt] = useState('');
 
@@ -365,7 +366,7 @@ export default function GalleryPage() {
               return (
                 <div
                   key={art.id}
-                  onClick={() => handleOpenWithPrompt(art.prompt)}
+                  onClick={() => setViewerArt(art)}
                   className={`group relative rounded-2xl overflow-hidden border border-white/10 bg-[#0E1015] cursor-pointer hover:border-emerald-400/50 hover:shadow-2xl hover:shadow-emerald-500/10 transition-all duration-300 ${art.aspectRatio}`}
                 >
                   {/* Badge */}
@@ -510,6 +511,38 @@ export default function GalleryPage() {
       </main>
 
       <Footer />
+
+      {/* Full-size viewer: tapping a picture opens this instead of the studio */}
+      {viewerArt && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/95 flex flex-col items-center justify-center p-4"
+          onClick={() => setViewerArt(null)}
+        >
+          <img
+            src={viewerArt.imageUrl}
+            alt={viewerArt.title}
+            className="max-w-full max-h-[78vh] object-contain rounded-xl"
+          />
+          <p className="mt-3 text-base font-bold text-white text-center line-clamp-2 max-w-xl">{viewerArt.title}</p>
+          <div className="mt-3 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => {
+                handleOpenWithPrompt(viewerArt.prompt);
+                setViewerArt(null);
+              }}
+              className="px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold"
+            >
+              Use prompt in studio
+            </button>
+            <button
+              onClick={() => setViewerArt(null)}
+              className="px-5 py-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-sm font-bold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       <GeneratorModal
         isOpen={isGeneratorOpen}
