@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   History,
   Sparkles,
-  Trash2,
   Download,
   Copy,
   Check,
@@ -13,12 +12,19 @@ import {
   Shirt,
   Compass,
 } from 'lucide-react';
-import {
-  GenerationHistoryItem,
-  getGenerationHistory,
-  clearGenerationHistory,
-  removeHistoryItem,
-} from '@/lib/generationHistory';
+import { supabase } from '@/lib/supabase';
+
+// History comes from the database, so it belongs to the signed-in account on any device.
+interface GenerationHistoryItem {
+  id: string;
+  timestamp: number;
+  imageUrl: string;
+  prompt: string;
+  title: string;
+  style: string;
+  clothing: string;
+  pantheon?: string;
+}
 
 export default function HistoryPage() {
   const navigate = useNavigate();
@@ -26,13 +32,41 @@ export default function HistoryPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const updateHistory = () => {
-      setHistory(getGenerationHistory());
+    const updateHistory = async () => {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (!sess.session) {
+          setHistory([]);
+          return;
+        }
+        const { data, error } = await supabase
+          .from('generations')
+          .select('id,prompt,result_url,share_title,quality,created_at')
+          .eq('kind', 'image')
+          .eq('blocked', false)
+          .not('result_url', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        setHistory(
+          (data ?? []).map((g) => ({
+            id: String(g.id),
+            timestamp: new Date(g.created_at as string).getTime(),
+            imageUrl: g.result_url as string,
+            prompt: String(g.prompt ?? ''),
+            title: g.share_title || String(g.prompt ?? 'Creation').slice(0, 48),
+            style: g.quality === 'high' ? 'High quality' : 'Standard',
+            clothing: '',
+          }))
+        );
+      } catch {
+        setHistory([]);
+      }
     };
-    updateHistory();
+    void updateHistory();
 
-    window.addEventListener('eidolon_history_updated', updateHistory);
-    return () => window.removeEventListener('eidolon_history_updated', updateHistory);
+    window.addEventListener('eidolon_user_updated', updateHistory);
+    return () => window.removeEventListener('eidolon_user_updated', updateHistory);
   }, []);
 
   const handleCopyPrompt = (id: string, promptText: string, e: React.MouseEvent) => {
@@ -40,12 +74,6 @@ export default function HistoryPage() {
     navigator.clipboard.writeText(promptText);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const handleClearAll = () => {
-    if (window.confirm('Are you sure you want to clear your generation history?')) {
-      clearGenerationHistory();
-    }
   };
 
   return (
@@ -66,16 +94,6 @@ export default function HistoryPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {history.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-300 text-xs font-semibold font-mono transition flex items-center gap-1.5"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear History</span>
-            </button>
-          )}
-
           <button
             onClick={() => navigate('/create')}
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black text-xs font-bold font-mono tracking-wider transition shadow-lg shadow-emerald-500/20 flex items-center gap-2"
@@ -128,16 +146,6 @@ export default function HistoryPage() {
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/70 backdrop-blur-md border border-white/10 text-emerald-400 font-semibold">
                       {item.style}
                     </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeHistoryItem(item.id);
-                      }}
-                      className="p-1.5 rounded-lg bg-black/70 hover:bg-red-500/30 text-gray-400 hover:text-red-300 transition"
-                      title="Remove from history"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
                   </div>
 
                   {/* Quick Action Overlay */}
@@ -217,7 +225,7 @@ export default function HistoryPage() {
 
                       <button
                         onClick={() => {
-                          localStorage.setItem('eidolon_gen_clothing', item.clothing);
+                          if (item.clothing) localStorage.setItem('eidolon_gen_clothing', item.clothing);
                           navigate('/create');
                         }}
                         className="text-[11px] text-gray-400 hover:text-white font-mono flex items-center gap-1 transition"
