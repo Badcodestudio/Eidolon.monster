@@ -17,6 +17,7 @@ import {
   History,
   Share2,
   Trash2,
+  Flag,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -30,6 +31,7 @@ export default function GalleryPage() {
   const [sharedArtworks, setSharedArtworks] = useState<Artwork[]>([]);
   const [myDbArtworks, setMyDbArtworks] = useState<Artwork[]>([]);
   const [isOwner, setIsOwner] = useState(false);
+  const [reportsMap, setReportsMap] = useState<Record<string, { n: number; reasons: string[] }>>({});
   const [notice, setNotice] = useState('');
   const [likesMap, setLikesMap] = useState<Record<string, number>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -72,9 +74,14 @@ export default function GalleryPage() {
     try {
       const res = await invokeFunction<{
         is_owner: boolean;
-        items: { id: string; title: string; prompt: string; image_url: string; likes: number }[];
+        items: { id: string; title: string; prompt: string; image_url: string; likes: number; reports?: number; report_reasons?: string[] }[];
       }>('community', { action: 'list' });
       setIsOwner(!!res.is_owner);
+      const rm: Record<string, { n: number; reasons: string[] }> = {};
+      for (const i of res.items ?? []) {
+        if (i.reports) rm[`shared-${i.id}`] = { n: i.reports, reasons: i.report_reasons ?? [] };
+      }
+      setReportsMap(rm);
       setSharedArtworks(
         (res.items ?? []).map((i) => ({
           id: `shared-${i.id}`,
@@ -162,6 +169,33 @@ export default function GalleryPage() {
       flash('Removed.');
     } catch (err) {
       flash(err instanceof Error ? err.message : 'Could not remove.');
+    }
+  };
+
+  const handleReport = async (art: Artwork, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const reason = window.prompt('Why are you reporting this piece? (optional)');
+    if (reason === null) return;
+    try {
+      await invokeFunction('community', { action: 'report', id: art.id.replace('shared-', ''), reason });
+      flash('Thanks, the report was sent for review.');
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Sign in to report.');
+    }
+  };
+
+  const handleDismiss = async (art: Artwork, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await invokeFunction('community', { action: 'dismiss', id: art.id.replace('shared-', '') });
+      setReportsMap((prev) => {
+        const next = { ...prev };
+        delete next[art.id];
+        return next;
+      });
+      flash('Report dismissed.');
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Could not dismiss.');
     }
   };
 
@@ -342,6 +376,13 @@ export default function GalleryPage() {
                     </div>
                   )}
 
+                  {isOwner && reportsMap[art.id] && (
+                    <div className="absolute top-3 right-3 z-10 bg-red-500 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-md flex items-center gap-1">
+                      <Flag className="w-2.5 h-2.5" />
+                      <span>Reported x{reportsMap[art.id].n}</span>
+                    </div>
+                  )}
+
                   <img
                     src={art.imageUrl}
                     alt={art.title}
@@ -360,6 +401,11 @@ export default function GalleryPage() {
                     <p className="text-[11px] text-gray-300 line-clamp-2 mt-1 italic font-serif">
                       "{art.prompt}"
                     </p>
+                    {isOwner && (reportsMap[art.id]?.reasons.length ?? 0) > 0 && (
+                      <p className="text-[11px] text-red-300 line-clamp-2 mt-1">
+                        Reports: {reportsMap[art.id].reasons.join(' | ')}
+                      </p>
+                    )}
 
                     <div className="flex items-center justify-between pt-3 mt-3 border-t border-white/15">
                       <button
@@ -392,6 +438,27 @@ export default function GalleryPage() {
                           >
                             <Share2 className="w-3 h-3" />
                             <span>Share</span>
+                          </button>
+                        )}
+
+                        {!isOwner && art.id.startsWith('shared-') && (
+                          <button
+                            onClick={(e) => handleReport(art, e)}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-white/20 hover:bg-white/30 text-white transition flex items-center gap-1 shadow-sm"
+                            title="Report this piece"
+                          >
+                            <Flag className="w-3 h-3" />
+                            <span>Report</span>
+                          </button>
+                        )}
+
+                        {isOwner && reportsMap[art.id] && (
+                          <button
+                            onClick={(e) => handleDismiss(art, e)}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-white/20 hover:bg-white/30 text-white transition shadow-sm"
+                            title="Keep it up and clear the report"
+                          >
+                            Keep
                           </button>
                         )}
 

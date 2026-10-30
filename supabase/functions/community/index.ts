@@ -1,7 +1,8 @@
 // Supabase Edge Function: community
-// Actions: list (public), share, unshare, like, remove (owner only).
+// Actions: list (public), share, unshare, like, report, remove/dismiss (owner only).
 // Only a person's own, unblocked image can be shared (it already passed our prompt check and fal's check).
-// The owner reviews the Community tab and can remove anything; a removed piece can't be shared again.
+// There is no approval queue: pieces go live once they pass those checks. The owner reviews a piece when a user
+// reports it, and can remove it; a removed piece can't be shared again.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 
@@ -52,11 +53,23 @@ Deno.serve(async (req) => {
         if (userId && l.user_id === userId) mine.add(l.generation_id);
       }
     }
+    // Owner only: open reports for these pieces (so removal can be decided after a user report).
+    const rep: Record<string, { n: number; reasons: string[] }> = {};
+    if (isOwner && ids.length) {
+      const { data: rr } = await admin.from("community_reports").select("generation_id,reason").eq("resolved", false).in("generation_id", ids);
+      for (const x of rr ?? []) {
+        const k = String(x.generation_id);
+        rep[k] ??= { n: 0, reasons: [] };
+        rep[k].n++;
+        if (x.reason) rep[k].reasons.push(String(x.reason));
+      }
+    }
     return json({
       is_owner: isOwner,
       items: (rows ?? []).map((r) => ({
         id: r.id, title: r.share_title || "Untitled", prompt: r.prompt ?? "", image_url: r.result_url,
         likes: counts[r.id] ?? 0, liked: mine.has(r.id),
+        reports: rep[String(r.id)]?.n ?? 0, report_reasons: rep[String(r.id)]?.reasons ?? [],
       })),
     });
   }
@@ -82,6 +95,22 @@ Deno.serve(async (req) => {
   const id = String(body.id ?? "");
   if (!id) return json({ error: "Missing id." }, 400);
 
+  if (action === "report") {
+    const { data: g } = await admin.from("generations").select("id,user_id").eq("id", id).eq("shared", true).maybeSingle();
+    if (!g) return json({ error: "Not found." }, 404);
+    if (g.user_id === userId) return json({ error: "That is your own piece." }, 400);
+    const reason = String(body.reason ?? "").trim().slice(0, 200);
+    const { error } = await admin.from("community_reports")
+      .upsert({ generation_id: id, reporter_id: userId, reason, resolved: false }, { onConflict: "generation_id,reporter_id" });
+    return error ? json({ error: "Could not send the report." }, 500) : json({ ok: true });
+  }
+
+  if (action === "dismiss") {
+    if (!isOwner) return json({ error: "Owner access only." }, 403);
+    const { error } = await admin.from("community_reports").update({ resolved: true }).eq("generation_id", id);
+    return error ? json({ error: "Could not update." }, 500) : json({ ok: true });
+  }
+
   if (action === "unshare") {
     let q = admin.from("generations").update({ shared: false }).eq("id", id);
     if (!isOwner) q = q.eq("user_id", userId);
@@ -92,6 +121,7 @@ Deno.serve(async (req) => {
   if (action === "remove") {
     if (!isOwner) return json({ error: "Owner access only." }, 403);
     const { error } = await admin.from("generations").update({ shared: false, removed_by_admin: true }).eq("id", id);
+    await admin.from("community_reports").update({ resolved: true }).eq("generation_id", id);
     return error ? json({ error: "Could not remove." }, 500) : json({ ok: true });
   }
 
