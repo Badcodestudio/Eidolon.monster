@@ -10,11 +10,14 @@ export interface GenerationHistoryItem {
   aspectRatio: string;
 }
 
-const STORAGE_KEY = 'eidolon_generation_history';
+import { scopedKey } from '@/lib/userScope';
+
+const BASE_KEY = 'eidolon_generation_history';
+const storageKey = () => scopedKey(BASE_KEY);
 
 export function getGenerationHistory(): GenerationHistoryItem[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey());
     if (raw) {
       return JSON.parse(raw);
     }
@@ -34,7 +37,7 @@ export function saveToGenerationHistory(item: Omit<GenerationHistoryItem, 'id' |
     };
     // Keep up to 100 recent generations
     const updated = [newItem, ...current].slice(0, 100);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(storageKey(), JSON.stringify(updated));
     window.dispatchEvent(new Event('eidolon_history_updated'));
   } catch {
     // fallback
@@ -42,7 +45,7 @@ export function saveToGenerationHistory(item: Omit<GenerationHistoryItem, 'id' |
 }
 
 export function clearGenerationHistory() {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(storageKey());
   window.dispatchEvent(new Event('eidolon_history_updated'));
 }
 
@@ -50,7 +53,7 @@ export function removeHistoryItem(id: string) {
   try {
     const current = getGenerationHistory();
     const updated = current.filter((item) => item.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(storageKey(), JSON.stringify(updated));
     window.dispatchEvent(new Event('eidolon_history_updated'));
   } catch {
     // fallback

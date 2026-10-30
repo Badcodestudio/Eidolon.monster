@@ -1,10 +1,11 @@
 import { Artwork, ARTWORK_GALLERY } from '@/data/artworks';
+import { scopedKey } from '@/lib/userScope';
 
-const STORAGE_KEY = 'eidolon_community_creations';
+const BASE_KEY = 'eidolon_community_creations';
 
 export function getCommunityArtworks(): Artwork[] {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(scopedKey(BASE_KEY));
     if (!saved) {
       // Seed default community epic scenes if storage is initially fresh
       const defaultCommunityScenes: Artwork[] = [
@@ -42,7 +43,7 @@ export function getCommunityArtworks(): Artwork[] {
           likes: 2980,
         },
       ];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultCommunityScenes));
+      localStorage.setItem(scopedKey(BASE_KEY), JSON.stringify(defaultCommunityScenes));
       return defaultCommunityScenes;
     }
     return JSON.parse(saved) as Artwork[];
@@ -63,7 +64,7 @@ export function saveArtworkToCommunity(artwork: Omit<Artwork, 'id' | 'likes' | '
 
   const updated = [newArtwork, ...existing];
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(scopedKey(BASE_KEY), JSON.stringify(updated));
     // Dispatch a custom event so any open page or gallery updates instantly without reload
     window.dispatchEvent(new Event('eidolon_gallery_updated'));
   } catch (err) {
