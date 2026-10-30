@@ -19,6 +19,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { AuthModal, getCurrentUser, saveUserSession, UserSession } from '@/components/AuthModal';
+import { useUsage } from '@/lib/usage';
 
 interface SidebarDrawerProps {
   isOpen: boolean;
@@ -36,6 +37,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => getCurrentUser());
+  const { usage } = useUsage();
+  const isOwner = !!usage?.isOwner;
 
   useEffect(() => {
     const handleUpdate = () => setCurrentUser(getCurrentUser());
@@ -45,7 +48,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const menuItems = [
+  const allMenuItems = [
     {
       id: 'create',
       label: 'Create',
@@ -164,6 +167,9 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       },
     },
   ];
+
+  // The Admin Console is only shown to the owner; everyone else never sees it.
+  const menuItems = allMenuItems.filter((item) => item.id !== 'admin' || isOwner);
 
   return (
     <div className="fixed inset-0 z-[100] flex animate-in fade-in duration-200">
