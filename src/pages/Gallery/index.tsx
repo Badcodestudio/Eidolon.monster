@@ -6,6 +6,7 @@ import { GeneratorModal } from '@/components/GeneratorModal';
 import { ARTWORK_GALLERY, Artwork } from '@/data/artworks';
 import { getCommunityArtworks } from '@/lib/communityGallery';
 import { invokeFunction } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import {
   Sparkles,
   Heart,
@@ -27,6 +28,7 @@ export default function GalleryPage() {
   const [activeFilter, setActiveFilter] = useState<string>(initialTab);
   const [communityArtworks, setCommunityArtworks] = useState<Artwork[]>([]);
   const [sharedArtworks, setSharedArtworks] = useState<Artwork[]>([]);
+  const [myDbArtworks, setMyDbArtworks] = useState<Artwork[]>([]);
   const [isOwner, setIsOwner] = useState(false);
   const [notice, setNotice] = useState('');
   const [likesMap, setLikesMap] = useState<Record<string, number>>({});
@@ -55,10 +57,12 @@ export default function GalleryPage() {
     };
 
     window.addEventListener('eidolon_gallery_updated', handleUpdate);
+    window.addEventListener('eidolon_user_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('eidolon_gallery_updated', handleUpdate);
+      window.removeEventListener('eidolon_user_updated', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
   }, []);
@@ -90,6 +94,46 @@ export default function GalleryPage() {
   };
   useEffect(() => {
     void loadShared();
+  }, []);
+
+  // My Creations come from the database, so they belong to the signed-in account on any device.
+  const loadMine = async () => {
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) {
+        setMyDbArtworks([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('generations')
+        .select('id,prompt,result_url,share_title')
+        .eq('kind', 'image')
+        .eq('blocked', false)
+        .not('result_url', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(120);
+      if (error) throw error;
+      setMyDbArtworks(
+        (data ?? []).map((g) => ({
+          id: `mine-${g.id}`,
+          title: g.share_title || String(g.prompt ?? 'Creation').slice(0, 48),
+          category: 'fantasy' as const,
+          imageUrl: g.result_url as string,
+          prompt: String(g.prompt ?? ''),
+          aspectRatio: 'aspect-[4/5]',
+          author: '',
+          likes: 0,
+        }))
+      );
+    } catch {
+      setMyDbArtworks([]);
+    }
+  };
+  useEffect(() => {
+    void loadMine();
+    const onUser = () => void loadMine();
+    window.addEventListener('eidolon_user_updated', onUser);
+    return () => window.removeEventListener('eidolon_user_updated', onUser);
   }, []);
 
   const flash = (msg: string) => {
@@ -161,8 +205,8 @@ export default function GalleryPage() {
   // saves, which only live in this browser. Keep them apart so "mine" is never shown as "community".
   const isShowcase = (a: Artwork) => a.id.startsWith('community-epic-');
   const showcaseArtworks = communityArtworks.filter(isShowcase);
-  const myArtworks = communityArtworks.filter((a) => !isShowcase(a));
-  const allArtworks = [...sharedArtworks, ...communityArtworks, ...ARTWORK_GALLERY];
+  const myArtworks = myDbArtworks;
+  const allArtworks = [...sharedArtworks, ...showcaseArtworks, ...ARTWORK_GALLERY];
 
   const filteredArtworks =
     activeFilter === 'all'
@@ -266,7 +310,7 @@ export default function GalleryPage() {
               <Sparkles className="w-6 h-6 text-emerald-400" />
             </div>
             <h3 className="text-lg font-bold text-white">
-              {activeFilter === 'mine' ? 'Nothing saved on this device yet' : 'No creations found in this gallery view yet'}
+              {activeFilter === 'mine' ? 'Nothing created on this account yet' : 'No creations found in this gallery view yet'}
             </h3>
             <p className="text-xs text-gray-400 max-w-sm mx-auto">
               Be the first creator to synthesize and publish an artwork to this feed!
@@ -405,6 +449,7 @@ export default function GalleryPage() {
         onClose={() => {
           setIsGeneratorOpen(false);
           void loadShared();
+          void loadMine();
         }}
         initialPrompt={activeGeneratorPrompt}
       />
