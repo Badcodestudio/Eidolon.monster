@@ -43,7 +43,52 @@ const ART_STYLES = [
   'Gothic/Alt',
   'Steampunk',
   'No Style',
+  'Random Style',
   'Custom Style',
+] as const;
+
+// Pool for 'Random Style'. A mix of movements, mediums and looks so you can see what the image model understands.
+const RANDOM_STYLES = [
+  'abstract expressionism, bold gestural brushwork',
+  'geometric abstraction, hard-edged shapes and flat color',
+  'cubist painting, fractured planes',
+  'surrealist painting in the style of Dali',
+  'impressionist oil painting, soft broken brushstrokes',
+  'baroque chiaroscuro oil painting',
+  'art nouveau poster, flowing lines and ornamental borders',
+  'art deco illustration, gold and black geometry',
+  'ukiyo-e woodblock print',
+  'Chinese ink wash painting',
+  'watercolor painting, bleeding washes',
+  'gouache storybook illustration',
+  'charcoal and graphite sketch',
+  'pen and ink crosshatch illustration',
+  'stained glass window design',
+  'medieval illuminated manuscript',
+  'Byzantine icon, gold leaf',
+  'pop art, halftone dots and bold outlines',
+  'psychedelic 1960s concert poster',
+  'vaporwave, pastel neon and glitch',
+  'synthwave retro-futurism',
+  'cyberpunk neon concept art',
+  'low-poly 3D render',
+  'claymation stop-motion look',
+  'papercut layered diorama',
+  'linocut block print, high contrast',
+  'comic book inks and flat colors',
+  'dark fantasy book cover painting, 1980s',
+  'pixel art, 16-bit',
+  'Studio Ghibli-like hand-painted anime background',
+  'expressionist woodcut, harsh angular shadows',
+  'fauvism, wild saturated color',
+  'pointillism, dots of pure color',
+  'glitch art, datamosh and RGB split',
+  'double exposure photography',
+  'dramatic cinematic photograph, 35mm film grain',
+  'tarot card illustration, ornate frame',
+  'blueprint technical drawing',
+  'graffiti street art, spray paint',
+  'macabre Victorian engraving',
 ] as const;
 
 // 1.5 Gender / Form (After Art Style)
@@ -576,6 +621,10 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
   // Free-text art style (used when 'Custom Style' is chosen)
   const [customStyleText, setCustomStyleText] = useState<string>('');
 
+  // 'Random Style': the style currently rolled from RANDOM_STYLES (re-rolled by the button).
+  const pickRandomStyle = () => RANDOM_STYLES[Math.floor(Math.random() * RANDOM_STYLES.length)] as string;
+  const [randomStyleText, setRandomStyleText] = useState<string>(() => pickRandomStyle());
+
   // Male build / look chips (used when Male or Any is selected)
   const [selectedLooks, setSelectedLooks] = useState<string[]>([]);
 
@@ -880,7 +929,13 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
         ? gender === 'Female' ? 'woman' : gender === 'Male' ? 'man' : 'character'
         : gender === 'Any' ? 'character figure' : `${gender.toLowerCase()} figure`;
     const styleDesc =
-      style === 'No Style' ? '' : style === 'Custom Style' ? customStyleText.trim() : `${style} art style`;
+      style === 'No Style'
+        ? ''
+        : style === 'Custom Style'
+        ? customStyleText.trim()
+        : style === 'Random Style'
+        ? randomStyleText
+        : `${style} art style`;
     const looksDesc = gender !== 'Female' && selectedLooks.length > 0 ? selectedLooks.join(', ') : '';
     const visibleTraits = traits.filter((t) =>
       closeUp ? !['legs', 'tail', 'arms'].includes(t) : halfBody ? !['legs'].includes(t) : true
@@ -1028,6 +1083,7 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
     referenceName,
     selectedLooks,
     customStyleText,
+    randomStyleText,
   ]);
 
   if (!isOpen) return null;
@@ -1237,6 +1293,18 @@ export const GeneratorModal: React.FC<GeneratorModalProps> = ({
                     </select>
                     <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
+                  {selectedStyle === 'Random Style' && (
+                    <div className="flex items-center gap-2 animate-fade-in">
+                      <p className="flex-1 text-sm text-emerald-300 leading-snug">{randomStyleText}</p>
+                      <button
+                        type="button"
+                        onClick={() => setRandomStyleText(pickRandomStyle())}
+                        className="shrink-0 px-3 py-2 rounded-lg bg-white text-black text-xs font-bold"
+                      >
+                        Re-roll
+                      </button>
+                    </div>
+                  )}
                   {selectedStyle === 'Custom Style' && (
                     <input
                       type="text"
