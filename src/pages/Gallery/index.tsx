@@ -41,7 +41,9 @@ export default function GalleryPage() {
     const tab = searchParams.get('tab');
     if (tab) {
       setActiveFilter(tab);
+      if (tab === 'community') void loadShared();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   // Load community creations & listen for real-time updates
@@ -81,8 +83,9 @@ export default function GalleryPage() {
           likes: i.likes,
         }))
       );
-    } catch {
-      // Community list unavailable: the featured pieces still show.
+    } catch (err) {
+      // Community list unavailable: the featured pieces still show, but say so instead of failing silently.
+      flash(`Community list could not load: ${err instanceof Error ? err.message : 'try again.'}`);
     }
   };
   useEffect(() => {
@@ -120,6 +123,7 @@ export default function GalleryPage() {
 
   const handleFilterChange = (filterId: string) => {
     setActiveFilter(filterId);
+    if (filterId === 'community') void loadShared();
     if (filterId === 'all') {
       setSearchParams({});
     } else {
@@ -398,7 +402,10 @@ export default function GalleryPage() {
 
       <GeneratorModal
         isOpen={isGeneratorOpen}
-        onClose={() => setIsGeneratorOpen(false)}
+        onClose={() => {
+          setIsGeneratorOpen(false);
+          void loadShared();
+        }}
         initialPrompt={activeGeneratorPrompt}
       />
     </div>
